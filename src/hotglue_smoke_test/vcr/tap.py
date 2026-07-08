@@ -7,10 +7,13 @@ from hotglue_smoke_test.vcr.base import VCRBaseTestRunner
 
 class VCRTapTestRunner(VCRBaseTestRunner):
     def __init__(self, test_case: str, script_dir: str):
-        super().__init__(test_case, script_dir)
-        self.output_file_path = os.path.join(self.test_case_path, "test_runtime", "data.singer")
         self.required_files = ["config.json", "catalog-selected.json"]
         self.catalog_attr = "catalog"
+        super().__init__(test_case, script_dir)
+
+    @property
+    def output_basename(self) -> str:
+        return "data.singer"
 
     def run_launch(self):
         with open(self.output_file_path, "w") as output_file:

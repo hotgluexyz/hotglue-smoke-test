@@ -8,6 +8,7 @@ import debugpy
 import vcr
 from freezegun import freeze_time
 
+SMOKE_TEST_MODES = ({"record", "generate", "run"})
 
 class VCRBaseTestRunner(ABC):
     def __init__(self, test_case: str, script_dir: str):
@@ -16,11 +17,25 @@ class VCRBaseTestRunner(ABC):
         self.test_case_path = os.path.join(self.script_dir, test_case)
         self.test_config_path = os.path.join(self.test_case_path, "test-config.json")
         self.vcr_cassette_path = os.path.join(self.test_case_path, "fixtures", "vcr.yaml")
-        self.is_recording = not os.path.exists(self.vcr_cassette_path)
 
-        self.output_file_path = os.path.join(self.test_case_path, "test_runtime", "data.singer")
-        self.required_files = ["config.json", "catalog-selected.json"]
-        self.catalog_attr = "catalog"
+        self.mode = os.environ.get("SMOKE_TEST_MODE", "run")
+        if self.mode not in SMOKE_TEST_MODES:
+            raise ValueError(
+                f"SMOKE_TEST_MODE must be one of {sorted(SMOKE_TEST_MODES)}, got {self.mode!r}"
+            )
+        self.is_recording = self.mode == "record"
+        self.output_file_path = self._resolve_output_path()
+
+    @property
+    @abstractmethod
+    def output_basename(self) -> str:
+        pass
+
+    def _resolve_output_path(self) -> str:
+        if self.mode == "record":
+            return os.devnull
+        subdir = "expected_output" if self.mode == "generate" else "test_runtime"
+        return os.path.join(self.test_case_path, subdir, self.output_basename)
 
     def run_test(self):
         if os.getenv("DEBUG", "false").lower() == "true":
@@ -55,7 +70,10 @@ class VCRBaseTestRunner(ABC):
 
         sys.argv = self.argv()
 
-        os.makedirs(os.path.dirname(self.output_file_path), exist_ok=True)
+        if self.mode == "record":
+            os.makedirs(os.path.dirname(self.vcr_cassette_path), exist_ok=True)
+        else:
+            os.makedirs(os.path.dirname(self.output_file_path), exist_ok=True)
 
         filter_query_parameters = test_config.get("filter_query_parameters", [])
         print(f"Filtering query parameters: {filter_query_parameters}")
@@ -67,7 +85,11 @@ class VCRBaseTestRunner(ABC):
                     self.run_launch()
             else:
                 self.run_launch()
-        print(f"Captured output written to: {self.output_file_path}")
+
+        if self.mode == "record":
+            print(f"VCR cassette recorded: {self.vcr_cassette_path}")
+        else:
+            print(f"Captured output written to: {self.output_file_path}")
 
     @classmethod
     def main(cls):

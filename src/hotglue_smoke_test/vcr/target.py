@@ -8,9 +8,12 @@ from hotglue_smoke_test.vcr.base import VCRBaseTestRunner
 
 class VCRTargetTestRunner(VCRBaseTestRunner):
     def __init__(self, test_case: str, script_dir: str):
-        super().__init__(test_case, script_dir)
-        self.output_file_path = os.path.join(self.test_case_path, "test_runtime", "state.json")
         self.required_files = ["config.json", "data.singer"]
+        super().__init__(test_case, script_dir)
+
+    @property
+    def output_basename(self) -> str:
+        return "state.json"
 
     def run_launch(self):
         with (
