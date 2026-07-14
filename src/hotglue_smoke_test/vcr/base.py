@@ -8,7 +8,13 @@ import debugpy
 import vcr
 from freezegun import freeze_time
 
-SMOKE_TEST_MODES = ({"record", "generate", "run"})
+from hotglue_smoke_test.vcr.sanitize import (
+    sanitize_cassette_file,
+    scrub_tokens_in_json,
+)
+
+SMOKE_TEST_MODES = {"record", "sanitize", "generate", "run"}
+
 
 class VCRBaseTestRunner(ABC):
     def __init__(self, test_case: str, script_dir: str):
@@ -32,7 +38,7 @@ class VCRBaseTestRunner(ABC):
         pass
 
     def _resolve_output_path(self) -> str:
-        if self.mode == "record":
+        if self.mode in ("record", "sanitize"):
             return os.devnull
         subdir = "expected_output" if self.mode == "generate" else "test_runtime"
         return os.path.join(self.test_case_path, subdir, self.output_basename)
@@ -53,6 +59,11 @@ class VCRBaseTestRunner(ABC):
         if os.path.exists(self.test_config_path):
             with open(self.test_config_path) as config_file:
                 test_config = json.load(config_file)
+
+        if self.mode == "sanitize":
+            self.sanitize_cassette(test_config)
+            print(f"VCR cassette sanitized: {self.vcr_cassette_path}")
+            return
 
         os.environ["IS_TEST"] = "true"
         if "ignore_streams" in test_config:
@@ -102,18 +113,28 @@ class VCRBaseTestRunner(ABC):
 
     def scrub_token_from_response(self, response):
         try:
-            token_keys = ["access_token", "refresh_token"]
             body = response["body"]["string"].decode("utf-8")
             data = json.loads(body)
-
-            for key in token_keys:
-                if key in data:
-                    data[key] = key
-                    response["body"]["string"] = json.dumps(data).encode("utf-8")
-            response["headers"]["Content-Length"] = [str(len(response["body"]["string"]))]
+            if isinstance(data, dict):
+                data = scrub_tokens_in_json(data)
+                response["body"]["string"] = json.dumps(data).encode("utf-8")
+                response["headers"]["Content-Length"] = [str(len(response["body"]["string"]))]
         except json.JSONDecodeError:
             pass
         return response
+
+    def sanitize_cassette(self, test_config=None):
+        """Default: scrub OAuth tokens from cassette response JSON bodies."""
+        def scrub_tokens_only(body: str) -> str:
+            try:
+                data = json.loads(body)
+            except json.JSONDecodeError:
+                return body
+            if isinstance(data, dict):
+                data = scrub_tokens_in_json(data)
+            return json.dumps(data)
+
+        sanitize_cassette_file(self.vcr_cassette_path, scrub_response=scrub_tokens_only)
 
     def vcr_use_cassette(self, filter_query_parameters, test_config=None):
         return vcr.use_cassette(

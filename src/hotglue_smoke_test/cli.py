@@ -16,6 +16,7 @@ from hotglue_smoke_test.artifacts import (
     validate_generate,
     validate_record,
     validate_run,
+    validate_sanitize,
     wipe_generate_artifacts,
     wipe_record_artifacts,
 )
@@ -130,6 +131,8 @@ def _prepare_case(
         validate_record(case_dir, force)
         if force:
             wipe_record_artifacts(case_dir)
+    elif mode == "sanitize":
+        validate_sanitize(case_dir, force)
     elif mode == "generate":
         validate_generate(case_dir, is_target, force)
         if force:
@@ -152,7 +155,12 @@ def _execute_case(
     case_dir = resolve_case_dir(tap_test_dir, testcase, test_suite)
     _prepare_case(mode, case_dir, is_target, force)
 
-    label = {"record": "Recording", "generate": "Generating", "run": "Running"}[mode]
+    label = {
+        "record": "Recording",
+        "sanitize": "Sanitizing",
+        "generate": "Generating",
+        "run": "Running",
+    }[mode]
     _print_section(f"{label}: {tap_name} / {testcase}")
     _print_status("INFO", f"Starting at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
@@ -231,6 +239,10 @@ def cmd_record(args: argparse.Namespace) -> int:
     return _run_command(args, "record")
 
 
+def cmd_sanitize(args: argparse.Namespace) -> int:
+    return _run_command(args, "sanitize")
+
+
 def cmd_generate(args: argparse.Namespace) -> int:
     return _run_command(args, "generate")
 
@@ -258,6 +270,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Wipe fixtures/, expected_output/, test_runtime/ and re-record",
     )
     record_parser.set_defaults(func=cmd_record, target=False, force=False)
+
+    sanitize_parser = subparsers.add_parser(
+        "sanitize", help="Scrub secrets/PII from recorded VCR cassette (optional)"
+    )
+    _add_common_args(sanitize_parser)
+    sanitize_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-scrub cassette in place (default always rewrites)",
+    )
+    sanitize_parser.set_defaults(func=cmd_sanitize, target=False, force=False)
 
     generate_parser = subparsers.add_parser("generate", help="Replay VCR and write expected_output/")
     _add_common_args(generate_parser)

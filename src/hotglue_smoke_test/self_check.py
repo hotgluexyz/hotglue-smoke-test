@@ -2,16 +2,26 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 from pathlib import Path
+
+from faker import Faker
 
 from hotglue_smoke_test.artifacts import (
     output_path,
     validate_generate,
     validate_record,
     validate_run,
+    validate_sanitize,
     wipe_generate_artifacts,
     wipe_record_artifacts,
+)
+from hotglue_smoke_test.vcr.sanitize import (
+    load_cassette,
+    sanitize_cassette_file,
+    scrub_response_json,
+    write_cassette,
 )
 
 
@@ -22,6 +32,71 @@ def _assert_raises_system_exit(fn) -> None:
         assert exc.code != 0
         return
     raise AssertionError("expected SystemExit")
+
+
+def _check_sanitize_round_trip(tmp: Path) -> None:
+    tmp.mkdir(parents=True, exist_ok=True)
+    cassette_path = tmp / "vcr.yaml"
+    body = json.dumps(
+        {
+            "access_token": "secret-token-value",
+            "email": "real@example.com",
+            "Email": "Alias@Example.com",
+            "first_name": "Ada",
+            "updatedAt": "2026-07-07T15:00:00Z",
+            "nested": {"email": "real@example.com", "phone": "+15551234"},
+        }
+    )
+    write_cassette(
+        cassette_path,
+        {
+            "interactions": [
+                {
+                    "request": {"uri": "https://example.com/api"},
+                    "response": {
+                        "body": {"string": body},
+                        "headers": {"Content-Length": [str(len(body))]},
+                    },
+                }
+            ]
+        },
+    )
+
+    faker = Faker()
+    Faker.seed(42)
+    cache = {}
+    scrub_keys = {"email", "Email", "phone", "first_name"}
+    preserve_keys = {"updatedAt"}
+
+    sanitize_cassette_file(
+        cassette_path,
+        scrub_response=lambda b: scrub_response_json(
+            b, scrub_keys, preserve_keys, faker, cache
+        ),
+    )
+
+    data = load_cassette(cassette_path)
+    scrubbed = json.loads(data["interactions"][0]["response"]["body"]["string"])
+    assert scrubbed["access_token"] == "access_token"
+    assert scrubbed["updatedAt"] == "2026-07-07T15:00:00Z"
+    assert scrubbed["email"] != "real@example.com"
+    assert "@" in scrubbed["Email"] and scrubbed["Email"] != "Alias@Example.com"
+    assert scrubbed["first_name"] != "Ada"
+    assert scrubbed["nested"]["email"] == scrubbed["email"]
+    assert scrubbed["nested"]["phone"] != "+15551234"
+
+    # same seed + cache empty → stable fake for same input on re-run
+    Faker.seed(42)
+    again = scrub_response_json(
+        json.dumps({"email": "real@example.com", "updatedAt": "keep"}),
+        scrub_keys,
+        preserve_keys,
+        Faker(),
+        {},
+    )
+    again_data = json.loads(again)
+    assert again_data["email"] == scrubbed["email"]
+    assert again_data["updatedAt"] == "keep"
 
 
 def main() -> None:
@@ -47,10 +122,12 @@ def main() -> None:
 
         _assert_raises_system_exit(lambda: validate_generate(case, False, force=False))
         validate_run(case, False)
+        validate_sanitize(case, force=False)
 
         wipe_record_artifacts(case)
         assert not (case / "fixtures").exists()
         assert not (case / "expected_output").exists()
+        _assert_raises_system_exit(lambda: validate_sanitize(case, force=False))
 
         (case / "fixtures").mkdir()
         (case / "fixtures" / "vcr.yaml").write_text("cassette\n")
@@ -63,6 +140,8 @@ def main() -> None:
         assert (case / "fixtures" / "vcr.yaml").is_file()
         assert not (case / "expected_output").exists()
         assert not (case / "test_runtime").exists()
+
+        _check_sanitize_round_trip(Path(tmp) / "sanitize_check")
 
     print("self_check: ok")
 
