@@ -13,7 +13,7 @@ from hotglue_smoke_test.vcr.sanitize import (
     scrub_tokens_in_json,
 )
 
-SMOKE_TEST_MODES = {"record", "sanitize", "generate", "run"}
+SMOKE_TEST_MODES = {"record", "generate", "run"}
 
 
 class VCRBaseTestRunner(ABC):
@@ -38,7 +38,7 @@ class VCRBaseTestRunner(ABC):
         pass
 
     def _resolve_output_path(self) -> str:
-        if self.mode in ("record", "sanitize"):
+        if self.mode == "record":
             return os.devnull
         subdir = "expected_output" if self.mode == "generate" else "test_runtime"
         return os.path.join(self.test_case_path, subdir, self.output_basename)
@@ -59,11 +59,6 @@ class VCRBaseTestRunner(ABC):
         if os.path.exists(self.test_config_path):
             with open(self.test_config_path) as config_file:
                 test_config = json.load(config_file)
-
-        if self.mode == "sanitize":
-            self.sanitize_cassette(test_config)
-            print(f"VCR cassette sanitized: {self.vcr_cassette_path}")
-            return
 
         os.environ["IS_TEST"] = "true"
         if "ignore_streams" in test_config:
@@ -99,6 +94,16 @@ class VCRBaseTestRunner(ABC):
 
         if self.mode == "record":
             print(f"VCR cassette recorded: {self.vcr_cassette_path}")
+            no_scrub = os.environ.get("SMOKE_TEST_NO_SCRUB", "").lower() in (
+                "1",
+                "true",
+                "yes",
+            )
+            if no_scrub:
+                print("Skipping cassette scrub (--no-scrub)")
+            else:
+                self.sanitize_cassette(test_config)
+                print(f"VCR cassette sanitized: {self.vcr_cassette_path}")
         else:
             print(f"Captured output written to: {self.output_file_path}")
 

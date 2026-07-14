@@ -1,4 +1,4 @@
-"""Post-record VCR cassette sanitization helpers."""
+"""VCR cassette sanitization helpers (runs after record by default)."""
 
 from __future__ import annotations
 

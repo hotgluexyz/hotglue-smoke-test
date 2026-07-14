@@ -13,7 +13,6 @@ from hotglue_smoke_test.artifacts import (
     validate_generate,
     validate_record,
     validate_run,
-    validate_sanitize,
     wipe_generate_artifacts,
     wipe_record_artifacts,
 )
@@ -122,12 +121,10 @@ def main() -> None:
 
         _assert_raises_system_exit(lambda: validate_generate(case, False, force=False))
         validate_run(case, False)
-        validate_sanitize(case, force=False)
 
         wipe_record_artifacts(case)
         assert not (case / "fixtures").exists()
         assert not (case / "expected_output").exists()
-        _assert_raises_system_exit(lambda: validate_sanitize(case, force=False))
 
         (case / "fixtures").mkdir()
         (case / "fixtures" / "vcr.yaml").write_text("cassette\n")

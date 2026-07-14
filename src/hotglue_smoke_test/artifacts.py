@@ -86,13 +86,6 @@ def _validate_live_credentials(case_dir: Path) -> None:
             )
 
 
-def validate_sanitize(case_dir: Path, force: bool) -> None:
-    cassette = cassette_path(case_dir)
-    if not cassette.is_file():
-        _die(f"missing cassette {cassette}; run record first")
-    # force is accepted for API symmetry; sanitize always rewrites in place
-
-
 def validate_generate(case_dir: Path, is_target: bool, force: bool) -> None:
     cassette = cassette_path(case_dir)
     if not cassette.is_file():
