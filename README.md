@@ -27,14 +27,17 @@ pip install "hotglue-smoke-test @ git+https://github.com/hotgluexyz/hotglue-smok
 
 ```bash
 # 1. Record VCR cassette (live API; discards Singer output), then scrub secrets/PII
-hotglue-smoke-test record   shopify-v2 orders_test --tap-directory .
+hotglue-smoke-test record   shopify-v2 orders_test --connector-directory .
+
 
 # 2. Replay cassette → write expected_output/
-hotglue-smoke-test generate shopify-v2 orders_test --tap-directory .
+hotglue-smoke-test generate shopify-v2 orders_test --connector-directory .
+
 
 # 3. Replay cassette → test_runtime/ → compare (CI uses this)
-hotglue-smoke-test run      shopify-v2 '*'           --tap-directory .
-hotglue-smoke-test run      shopify-v2 orders_test   --tap-directory .
+hotglue-smoke-test run      shopify-v2 '*'           --connector-directory .
+hotglue-smoke-test run      shopify-v2 orders_test   --connector-directory .
+
 ```
 
 `record` scrubs by default after the live HTTP capture (cassette response bodies + connector `record-vcr.py` rules). Use `--no-scrub` only for local debug; do not commit unsanitized cassettes.

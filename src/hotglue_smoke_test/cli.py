@@ -34,12 +34,12 @@ def _print_status(status: str, message: str) -> None:
     print(f"[{timestamp}] {status}: {message}")
 
 
-def _resolve_tap_source_dir(tap_directory: str) -> Path:
-    return Path(tap_directory).resolve()
+def _resolve_connector_dir(connector_directory: str) -> Path:
+    return Path(connector_directory).resolve()
 
 
-def _resolve_tests_dir(tap_source_dir: Path) -> Path:
-    tests_dir = tap_source_dir / "__tests__"
+def _resolve_tests_dir(connector_dir: Path) -> Path:
+    tests_dir = connector_dir / "__tests__"
     record_vcr = tests_dir / "record-vcr.py"
     if not record_vcr.is_file():
         print(
@@ -65,15 +65,15 @@ def _discover_cases(test_dir: Path, case_name: str, test_suite: str | None) -> l
     return [case_name]
 
 
-def _python_executable(tap_source_dir: Path) -> str:
-    venv_python = tap_source_dir / ".venv" / "bin" / "python"
+def _python_executable(connector_dir: Path) -> str:
+    venv_python = connector_dir / ".venv" / "bin" / "python"
     if venv_python.is_file():
         return str(venv_python)
     return sys.executable
 
 
-def _load_ci_env(tap_source_dir: Path) -> None:
-    ci_env = tap_source_dir / "ci.env"
+def _load_ci_env(connector_dir: Path) -> None:
+    ci_env = connector_dir / "ci.env"
     if not ci_env.is_file():
         return
     for line in ci_env.read_text().splitlines():
@@ -87,7 +87,7 @@ def _load_ci_env(tap_source_dir: Path) -> None:
 
 
 def _run_record_vcr(
-    tap_source_dir: Path,
+    connector_dir: Path,
     tests_dir: Path,
     testcase: str,
     test_suite: str | None,
@@ -98,7 +98,7 @@ def _run_record_vcr(
     record_vcr = tests_dir / "record-vcr.py"
     case = case_relpath(testcase, test_suite)
     env = os.environ.copy()
-    env["PYTHONPATH"] = str(tap_source_dir)
+    env["PYTHONPATH"] = str(connector_dir)
     env["SMOKE_TEST_MODE"] = mode
     if no_scrub:
         env["SMOKE_TEST_NO_SCRUB"] = "1"
@@ -139,9 +139,9 @@ def _prepare_case(
 
 def _execute_case(
     mode: str,
-    tap_name: str,
+    connector_name: str,
     testcase: str,
-    tap_source_dir: Path,
+    connector_dir: Path,
     smoke_test_dir: Path,
     is_target: bool,
     test_suite: str | None,
@@ -153,15 +153,15 @@ def _execute_case(
     _prepare_case(mode, case_dir, is_target, force)
 
     label = {
-        "record": "Recording",
-        "generate": "Generating",
-        "run": "Running",
+        "record": "Recording vcr",
+        "generate": "Generating data.singer/state.json",
+        "run": "Running comparison",
     }[mode]
-    _print_section(f"{label}: {tap_name} / {testcase}")
+    _print_section(f"{label}: {connector_name} / {testcase}")
     _print_status("INFO", f"Starting at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
     _run_record_vcr(
-        tap_source_dir,
+        connector_dir,
         smoke_test_dir,
         testcase,
         test_suite,
@@ -180,19 +180,19 @@ def _run_command(args: argparse.Namespace) -> int:
     mode = args.mode
     os.environ.setdefault("TZ", "America/New_York")
 
-    tap_source_dir = _resolve_tap_source_dir(args.tap_directory)
-    smoke_test_dir = _resolve_tests_dir(tap_source_dir)
-    _load_ci_env(tap_source_dir)
+    connector_dir = _resolve_connector_dir(args.connector_directory)
+    smoke_test_dir = _resolve_tests_dir(connector_dir)
+    _load_ci_env(connector_dir)
 
     _print_section("Test Configuration")
     _print_status("INFO", f"Mode: {mode}")
-    _print_status("INFO", f"TAP Name: {args.tap_name}")
+    _print_status("INFO", f"Connector Name: {args.connector_name}")
     _print_status("INFO", f"Case Name: {args.case_name}")
     _print_status("INFO", f"Target Mode: {args.target}")
-    _print_status("INFO", f"Tap Source Directory: {tap_source_dir}")
+    _print_status("INFO", f"Connector Directory: {connector_dir}")
     _print_status("INFO", f"Test Directory: {smoke_test_dir}")
 
-    python_exe = _python_executable(tap_source_dir)
+    python_exe = _python_executable(connector_dir)
     test_suite = os.environ.get("TEST_SUITE")
     cases = _discover_cases(smoke_test_dir, args.case_name, test_suite)
 
@@ -207,9 +207,9 @@ def _run_command(args: argparse.Namespace) -> int:
         try:
             _execute_case(
                 mode,
-                args.tap_name,
+                args.connector_name,
                 testcase,
-                tap_source_dir,
+                connector_dir,
                 smoke_test_dir,
                 args.target,
                 test_suite,
@@ -240,9 +240,13 @@ def _run_command(args: argparse.Namespace) -> int:
 
 
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("tap_name", help="Connector name without tap-/target- prefix")
+    parser.add_argument("connector_name", help="Connector name without tap-/target- prefix")
     parser.add_argument("case_name", help="Test case name ending in _test, or * for all")
-    parser.add_argument("--tap-directory", required=True, help="Path to connector repo root")
+    parser.add_argument(
+        "--connector-directory",
+        required=True,
+        help="Path to connector repo root",
+    )
     parser.add_argument("--target", action="store_true", help="Run as target")
 
 

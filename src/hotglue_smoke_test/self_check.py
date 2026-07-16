@@ -10,7 +10,6 @@ from faker import Faker
 
 from hotglue_smoke_test.artifacts import (
     output_path,
-    sanitize_config_credentials,
     validate_generate,
     validate_record,
     validate_run,
@@ -20,6 +19,7 @@ from hotglue_smoke_test.artifacts import (
 from hotglue_smoke_test.vcr.sanitize import (
     load_cassette,
     sanitize_cassette_file,
+    sanitize_config_credentials,
     scrub_response_json,
     write_cassette,
 )
