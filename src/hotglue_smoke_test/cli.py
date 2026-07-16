@@ -109,8 +109,8 @@ def _run_record_vcr(
     subprocess.run([python_exe, str(record_vcr), case], env=env, check=True)
 
 
-def _run_comparison(tap_test_dir: Path, case_name: str, is_target: bool) -> None:
-    os.environ["TAP_TEST_DIR"] = str(tap_test_dir)
+def _run_comparison(smoke_test_dir: Path, case_name: str, is_target: bool) -> None:
+    os.environ["SMOKE_TEST_DIR"] = str(smoke_test_dir)
     os.environ["CASE_NAME"] = case_name
 
     driver = target_driver if is_target else tap_driver
@@ -142,14 +142,14 @@ def _execute_case(
     tap_name: str,
     testcase: str,
     tap_source_dir: Path,
-    tap_test_dir: Path,
+    smoke_test_dir: Path,
     is_target: bool,
     test_suite: str | None,
     python_exe: str,
     force: bool,
     no_scrub: bool = False,
 ) -> None:
-    case_dir = resolve_case_dir(tap_test_dir, testcase, test_suite)
+    case_dir = resolve_case_dir(smoke_test_dir, testcase, test_suite)
     _prepare_case(mode, case_dir, is_target, force)
 
     label = {
@@ -162,7 +162,7 @@ def _execute_case(
 
     _run_record_vcr(
         tap_source_dir,
-        tap_test_dir,
+        smoke_test_dir,
         testcase,
         test_suite,
         python_exe,
@@ -173,7 +173,7 @@ def _execute_case(
     if mode == "run":
         case_name = case_relpath(testcase, test_suite)
         _print_status("INFO", f"Running comparison for case {case_name}")
-        _run_comparison(tap_test_dir, case_name, is_target)
+        _run_comparison(smoke_test_dir, case_name, is_target)
 
 
 def _run_command(args: argparse.Namespace) -> int:
@@ -181,7 +181,7 @@ def _run_command(args: argparse.Namespace) -> int:
     os.environ.setdefault("TZ", "America/New_York")
 
     tap_source_dir = _resolve_tap_source_dir(args.tap_directory)
-    tap_test_dir = _resolve_tests_dir(tap_source_dir)
+    smoke_test_dir = _resolve_tests_dir(tap_source_dir)
     _load_ci_env(tap_source_dir)
 
     _print_section("Test Configuration")
@@ -190,15 +190,15 @@ def _run_command(args: argparse.Namespace) -> int:
     _print_status("INFO", f"Case Name: {args.case_name}")
     _print_status("INFO", f"Target Mode: {args.target}")
     _print_status("INFO", f"Tap Source Directory: {tap_source_dir}")
-    _print_status("INFO", f"Test Directory: {tap_test_dir}")
+    _print_status("INFO", f"Test Directory: {smoke_test_dir}")
 
     python_exe = _python_executable(tap_source_dir)
     test_suite = os.environ.get("TEST_SUITE")
-    cases = _discover_cases(tap_test_dir, args.case_name, test_suite)
+    cases = _discover_cases(smoke_test_dir, args.case_name, test_suite)
 
     _print_section("Starting Execution")
     if args.case_name == "*":
-        _print_status("INFO", f"Finding all test cases in {tap_test_dir} that end in '_test'...")
+        _print_status("INFO", f"Finding all test cases in {smoke_test_dir} that end in '_test'...")
 
     passed: list[str] = []
     failed: list[str] = []
@@ -210,7 +210,7 @@ def _run_command(args: argparse.Namespace) -> int:
                 args.tap_name,
                 testcase,
                 tap_source_dir,
-                tap_test_dir,
+                smoke_test_dir,
                 args.target,
                 test_suite,
                 python_exe,
