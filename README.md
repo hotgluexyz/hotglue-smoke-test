@@ -65,12 +65,6 @@ generate --force orders_test  # refresh data.singer/state.json after connector c
 run orders_test
 ```
 
-## Breaking changes (v0.2)
-
-- `run` no longer auto-records when the cassette is missing.
-- Recording and generating are separate steps; `record` does not produce `expected_output/`.
-- Scrub runs in the `record` step by default (no separate `sanitize` command). Use `--no-scrub` to skip.
-
 Connector `__tests__/record-vcr.py`:
 
 ```python
