@@ -5,7 +5,6 @@ import sys
 from abc import ABC, abstractmethod
 from contextlib import nullcontext
 
-import debugpy
 import vcr
 from freezegun import freeze_time
 
@@ -38,12 +37,6 @@ class VCRBaseTestRunner(ABC):
         return os.path.join(self.test_case_path, subdir, self.output_basename)
 
     def run_test(self):
-        if os.environ.get("DEBUG", "").lower() == "true":
-            debugpy.listen(("localhost", 5678))
-            print("Waiting for debugger attach...")
-            debugpy.wait_for_client()
-            print("Debugger is attached, continuing...")
-
         for filename in self.required_files:
             file_path = os.path.join(self.test_case_path, filename)
             if not os.path.exists(file_path):
