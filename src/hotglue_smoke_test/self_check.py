@@ -10,6 +10,7 @@ from faker import Faker
 
 from hotglue_smoke_test.artifacts import (
     output_path,
+    sanitize_config_credentials,
     validate_generate,
     validate_record,
     validate_run,
@@ -118,6 +119,8 @@ def main() -> None:
 
         (case / "config.json").write_text('{"api_key": "shpca_live_token"}\n')
         validate_record(case, force=True)
+        sanitize_config_credentials(case)
+        assert json.loads((case / "config.json").read_text())["api_key"] == "API_KEY"
 
         _assert_raises_system_exit(lambda: validate_generate(case, False, force=False))
         validate_run(case, False)

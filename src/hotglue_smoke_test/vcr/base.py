@@ -11,6 +11,7 @@ from freezegun import freeze_time
 from hotglue_smoke_test.vcr.sanitize import (
     sanitize_cassette_file,
     scrub_tokens_in_json,
+    sanitize_config_credentials,
 )
 
 
@@ -83,6 +84,7 @@ class VCRBaseTestRunner(ABC):
                 print("Skipping cassette scrub (--no-scrub)")
             else:
                 self.sanitize_cassette()
+                sanitize_config_credentials(self.test_case_path)
                 print(f"VCR cassette sanitized: {self.vcr_cassette_path}")
         else:
             print(f"Captured output written to: {self.output_file_path}")

@@ -7,24 +7,7 @@ import shutil
 import sys
 from pathlib import Path
 
-#literal placeholders only; extend when new obfuscation patterns appear
-_CREDENTIAL_KEYS = (
-    "api_key",
-    "access_token",
-    "refresh_token",
-    "client_secret",
-    "client_id",
-    "password",
-    "token",
-)
-_PLACEHOLDER_VALUES = (
-    "API_KEY", 
-    "YOUR_API_KEY", 
-    "PLACEHOLDER", 
-    "changeme", 
-    "<api_key>", 
-    "xxx",
-)
+from hotglue_smoke_test.vcr.sanitize import TOKEN_KEYS
 
 
 def case_relpath(testcase: str, test_suite: str | None) -> str:
@@ -83,11 +66,12 @@ def _validate_live_credentials(case_dir: Path) -> None:
     if not config_path.is_file():
         return
     config = json.loads(config_path.read_text())
-    for key in _CREDENTIAL_KEYS:
+    for key in TOKEN_KEYS:
         value = config.get(key)
         if not isinstance(value, str) or not value:
+            #int were converted to strings on the sanitize_config_credentials
             continue
-        if value in _PLACEHOLDER_VALUES or value.upper() in _PLACEHOLDER_VALUES:
+        if "***" in value:
             _die(
                 f"config.json contains placeholder {key}={value!r}; "
                 "copy live credentials from .secrets/config.json into the case config before recording"
