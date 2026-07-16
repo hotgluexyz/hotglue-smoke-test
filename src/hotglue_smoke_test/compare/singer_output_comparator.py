@@ -66,6 +66,8 @@ class SingerOutputComparator:
                     
                     schemas_by_stream[stream_name] = {
                         "key_attributes": key_attributes,
+                        "schema": schema,
+                        "bookmark_properties": data.get("bookmark_properties", [])
                     }
 
                     print(f"Stream: {stream_name}")
@@ -288,7 +290,7 @@ class SingerOutputComparator:
             records (list): The records to check for duplicates.
             key_attributes (list): The key attributes to use for duplicate detection.
         """
-        if not key_attributes:
+        if not key_attributes or key_attributes is None:
             print(f"WARNING: No key attributes defined for stream '{stream_name}', skipping duplicate validation.")
             return
 
@@ -356,7 +358,7 @@ class SingerOutputComparator:
         if not records:
             return  # No records to validate
         
-        if not key_attributes:
+        if not key_attributes or key_attributes is None:
             print(f"WARNING: No key attributes defined for stream '{stream_name}', skipping key attribute validation.")
             return
 
