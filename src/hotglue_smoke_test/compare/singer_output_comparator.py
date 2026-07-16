@@ -369,7 +369,8 @@ class SingerOutputComparator:
                 keys = attr.split('.')
                 value = record
                 for key in keys:
-                    if isinstance(value, dict) and value.get(key) is not None:
+                    # Key present with JSON null is valid; only absent keys are missing.
+                    if isinstance(value, dict) and key in value:
                         value = value[key]
                     else:
                         missing_attributes.append({

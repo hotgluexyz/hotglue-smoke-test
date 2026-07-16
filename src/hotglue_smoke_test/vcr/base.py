@@ -1,3 +1,4 @@
+import inspect
 import json
 import os
 import sys
@@ -105,7 +106,8 @@ class VCRBaseTestRunner(ABC):
             print("Usage: record-vcr.py <testcase>")
             sys.exit(1)
         test_case = sys.argv[1]
-        runner = cls(test_case)
+        script_dir = os.path.dirname(os.path.abspath(inspect.getfile(cls)))
+        runner = cls(test_case, script_dir)
         runner.run_test()
 
     def scrub_token_from_response(self, response):

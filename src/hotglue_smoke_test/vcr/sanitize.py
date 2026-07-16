@@ -270,6 +270,9 @@ def sanitize_cassette_file(
 
         headers = response.get("headers") or {}
         if "Content-Length" in headers:
-            headers["Content-Length"] = [str(len(scrubbed))]
+            stored = body["string"]
+            # Byte length of the body as stored (UTF-8 for str; raw len for bytes).
+            nbytes = len(stored) if isinstance(stored, bytes) else len(stored.encode("utf-8"))
+            headers["Content-Length"] = [str(nbytes)]
 
     write_cassette(path, cassette)
