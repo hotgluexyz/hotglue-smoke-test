@@ -2,7 +2,7 @@ import json
 import os
 import sys
 from abc import ABC, abstractmethod
-from typing import List
+from contextlib import nullcontext
 
 import debugpy
 import vcr
@@ -29,7 +29,6 @@ class VCRBaseTestRunner(ABC):
             raise ValueError(
                 f"SMOKE_TEST_MODE must be one of {sorted(SMOKE_TEST_MODES)}, got {self.mode!r}"
             )
-        self.is_recording = self.mode == "record"
         self.output_file_path = self._resolve_output_path()
 
     @property
@@ -44,7 +43,7 @@ class VCRBaseTestRunner(ABC):
         return os.path.join(self.test_case_path, subdir, self.output_basename)
 
     def run_test(self):
-        if os.getenv("DEBUG", "false").lower() == "true":
+        if os.environ.get("DEBUG", "").lower() == "true":
             debugpy.listen(("localhost", 5678))
             print("Waiting for debugger attach...")
             debugpy.wait_for_client()
@@ -84,25 +83,18 @@ class VCRBaseTestRunner(ABC):
         filter_query_parameters = test_config.get("filter_query_parameters", [])
         print(f"Filtering query parameters: {filter_query_parameters}")
 
-        with self.vcr_use_cassette(filter_query_parameters, test_config):
+        with self.vcr_use_cassette(filter_query_parameters):
             freeze_datetime = test_config.get("freeze_time")
-            if freeze_datetime:
-                with freeze_time(freeze_datetime):
-                    self.run_launch()
-            else:
+            ctx = freeze_time(freeze_datetime) if freeze_datetime else nullcontext()
+            with ctx:
                 self.run_launch()
 
         if self.mode == "record":
             print(f"VCR cassette recorded: {self.vcr_cassette_path}")
-            no_scrub = os.environ.get("SMOKE_TEST_NO_SCRUB", "").lower() in (
-                "1",
-                "true",
-                "yes",
-            )
-            if no_scrub:
+            if os.environ.get("SMOKE_TEST_NO_SCRUB") == "1":
                 print("Skipping cassette scrub (--no-scrub)")
             else:
-                self.sanitize_cassette(test_config)
+                self.sanitize_cassette()
                 print(f"VCR cassette sanitized: {self.vcr_cassette_path}")
         else:
             print(f"Captured output written to: {self.output_file_path}")
@@ -117,6 +109,7 @@ class VCRBaseTestRunner(ABC):
         runner.run_test()
 
     def scrub_token_from_response(self, response):
+        # Token scrub during record; full sanitize_cassette runs after record completes.
         try:
             body = response["body"]["string"].decode("utf-8")
             data = json.loads(body)
@@ -128,7 +121,7 @@ class VCRBaseTestRunner(ABC):
             pass
         return response
 
-    def sanitize_cassette(self, test_config=None):
+    def sanitize_cassette(self):
         """Default: scrub OAuth tokens from cassette response JSON bodies."""
         def scrub_tokens_only(body: str) -> str:
             try:
@@ -141,19 +134,21 @@ class VCRBaseTestRunner(ABC):
 
         sanitize_cassette_file(self.vcr_cassette_path, scrub_response=scrub_tokens_only)
 
-    def vcr_use_cassette(self, filter_query_parameters, test_config=None):
-        return vcr.use_cassette(
-            self.vcr_cassette_path,
-            decode_compressed_response=True,
-            filter_headers=["authorization"],
-            filter_post_data_parameters=[
+    def vcr_use_cassette(self, filter_query_parameters, before_record_response=None):
+        kwargs = {
+            "decode_compressed_response": True,
+            "filter_headers": ["authorization"],
+            "filter_post_data_parameters": [
                 "client_id",
                 "client_secret",
                 "refresh_token",
                 "access_token",
             ],
-            filter_query_parameters=filter_query_parameters,
-        )
+            "filter_query_parameters": filter_query_parameters,
+        }
+        if before_record_response is not None:
+            kwargs["before_record_response"] = before_record_response
+        return vcr.use_cassette(self.vcr_cassette_path, **kwargs)
 
     @abstractmethod
     def module(self) -> str:
@@ -168,5 +163,5 @@ class VCRBaseTestRunner(ABC):
         pass
 
     @abstractmethod
-    def argv(self) -> List[str]:
+    def argv(self) -> list[str]:
         pass

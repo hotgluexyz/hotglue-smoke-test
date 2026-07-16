@@ -1,4 +1,3 @@
-import glob
 import json
 import os
 from collections import defaultdict
@@ -24,14 +23,10 @@ class SingerOutputComparator:
         Args:
             directory (str): The directory to validate.
         """
-        # Assert the directory exists
         assert os.path.isdir(directory), f"The directory '{directory}' does not exist."
-
-        # Validate that there is exactly one 'data.singer' file
-        data_singer_files = glob.glob(os.path.join(directory, "data.singer"))
-        assert len(data_singer_files) == 1, (
-            f"The directory '{directory}' must contain exactly one 'data.singer' file. "
-            f"Found {len(data_singer_files)} file(s)."
+        data_singer = os.path.join(directory, "data.singer")
+        assert os.path.isfile(data_singer), (
+            f"The directory '{directory}' must contain a 'data.singer' file."
         )
 
     def _validate_singer_schema(self, file_path):
@@ -71,10 +66,8 @@ class SingerOutputComparator:
                     
                     schemas_by_stream[stream_name] = {
                         "key_attributes": key_attributes,
-                        "schema": schema,
-                        "bookmark_properties": data.get("bookmark_properties", [])
                     }
-                    
+
                     print(f"Stream: {stream_name}")
                     print(f"  Key Attributes: {key_attributes}")
                     print(f"  Bookmark Properties: {data.get('bookmark_properties', [])}")
@@ -295,7 +288,7 @@ class SingerOutputComparator:
             records (list): The records to check for duplicates.
             key_attributes (list): The key attributes to use for duplicate detection.
         """
-        if not key_attributes or key_attributes is None:
+        if not key_attributes:
             print(f"WARNING: No key attributes defined for stream '{stream_name}', skipping duplicate validation.")
             return
 
@@ -363,7 +356,7 @@ class SingerOutputComparator:
         if not records:
             return  # No records to validate
         
-        if not key_attributes or key_attributes is None:
+        if not key_attributes:
             print(f"WARNING: No key attributes defined for stream '{stream_name}', skipping key attribute validation.")
             return
 

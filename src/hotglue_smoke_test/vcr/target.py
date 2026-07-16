@@ -1,8 +1,6 @@
 import os
 import sys
 
-import vcr
-
 from hotglue_smoke_test.vcr.base import VCRBaseTestRunner
 
 
@@ -28,24 +26,15 @@ class VCRTargetTestRunner(VCRBaseTestRunner):
                 sys.stdin = sys.__stdin__
                 sys.stdout = sys.__stdout__
 
-    def vcr_use_cassette(self, filter_query_parameters, test_config=None):
-        return vcr.use_cassette(
-            self.vcr_cassette_path,
-            decode_compressed_response=True,
-            filter_headers=["authorization"],
-            filter_post_data_parameters=[
-                "client_id",
-                "client_secret",
-                "refresh_token",
-                "access_token",
-            ],
-            filter_query_parameters=filter_query_parameters,
+    def vcr_use_cassette(self, filter_query_parameters):
+        return super().vcr_use_cassette(
+            filter_query_parameters,
             before_record_response=self.scrub_token_from_response,
         )
 
     def argv(self):
         return [
-            "target.py",
+            self.module(),
             "--config",
             os.path.join(self.test_case_path, "config.json"),
         ]

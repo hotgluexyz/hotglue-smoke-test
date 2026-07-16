@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from hotglue_smoke_test.artifacts import (
+    case_relpath,
     resolve_case_dir,
     validate_generate,
     validate_record,
@@ -33,10 +34,7 @@ def _print_status(status: str, message: str) -> None:
     print(f"[{timestamp}] {status}: {message}")
 
 
-def _resolve_tap_source_dir(tap_directory: str | None) -> Path:
-    if not tap_directory:
-        print("Error: --tap-directory is required.", file=sys.stderr)
-        sys.exit(1)
+def _resolve_tap_source_dir(tap_directory: str) -> Path:
     return Path(tap_directory).resolve()
 
 
@@ -67,12 +65,6 @@ def _discover_cases(test_dir: Path, case_name: str, test_suite: str | None) -> l
     return [case_name]
 
 
-def _case_name_for_driver(testcase: str, test_suite: str | None) -> str:
-    if test_suite:
-        return f"{test_suite}/{testcase}"
-    return testcase
-
-
 def _python_executable(tap_source_dir: Path) -> str:
     venv_python = tap_source_dir / ".venv" / "bin" / "python"
     if venv_python.is_file():
@@ -82,12 +74,16 @@ def _python_executable(tap_source_dir: Path) -> str:
 
 def _load_ci_env(tap_source_dir: Path) -> None:
     ci_env = tap_source_dir / "ci.env"
-    if ci_env.is_file():
-        for line in ci_env.read_text().splitlines():
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                key, _, value = line.partition("=")
-                os.environ.setdefault(key, value)
+    if not ci_env.is_file():
+        return
+    for line in ci_env.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :].lstrip()
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key, value)
 
 
 def _run_record_vcr(
@@ -100,7 +96,7 @@ def _run_record_vcr(
     no_scrub: bool = False,
 ) -> None:
     record_vcr = tests_dir / "record-vcr.py"
-    case = f"{test_suite}/{testcase}" if test_suite else testcase
+    case = case_relpath(testcase, test_suite)
     env = os.environ.copy()
     env["PYTHONPATH"] = str(tap_source_dir)
     env["SMOKE_TEST_MODE"] = mode
@@ -175,17 +171,17 @@ def _execute_case(
     )
 
     if mode == "run":
-        case_name = _case_name_for_driver(testcase, test_suite)
+        case_name = case_relpath(testcase, test_suite)
         _print_status("INFO", f"Running comparison for case {case_name}")
         _run_comparison(tap_test_dir, case_name, is_target)
 
 
-def _run_command(args: argparse.Namespace, mode: str) -> int:
+def _run_command(args: argparse.Namespace) -> int:
+    mode = args.mode
     os.environ.setdefault("TZ", "America/New_York")
 
     tap_source_dir = _resolve_tap_source_dir(args.tap_directory)
     tap_test_dir = _resolve_tests_dir(tap_source_dir)
-    os.environ["TAP_SOURCE_DIR"] = str(tap_source_dir)
     _load_ci_env(tap_source_dir)
 
     _print_section("Test Configuration")
@@ -199,8 +195,6 @@ def _run_command(args: argparse.Namespace, mode: str) -> int:
     python_exe = _python_executable(tap_source_dir)
     test_suite = os.environ.get("TEST_SUITE")
     cases = _discover_cases(tap_test_dir, args.case_name, test_suite)
-    force = getattr(args, "force", False)
-    no_scrub = getattr(args, "no_scrub", False)
 
     _print_section("Starting Execution")
     if args.case_name == "*":
@@ -220,8 +214,8 @@ def _run_command(args: argparse.Namespace, mode: str) -> int:
                 args.target,
                 test_suite,
                 python_exe,
-                force,
-                no_scrub=no_scrub,
+                args.force,
+                no_scrub=args.no_scrub,
             )
             passed.append(testcase)
             _print_status("SUCCESS", f"Completed {mode} successfully: {testcase}")
@@ -243,18 +237,6 @@ def _run_command(args: argparse.Namespace, mode: str) -> int:
         return 1
     _print_status("SUCCESS", f"All {mode} cases completed successfully.")
     return 0
-
-
-def cmd_record(args: argparse.Namespace) -> int:
-    return _run_command(args, "record")
-
-
-def cmd_generate(args: argparse.Namespace) -> int:
-    return _run_command(args, "generate")
-
-
-def cmd_run(args: argparse.Namespace) -> int:
-    return _run_command(args, "run")
 
 
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
@@ -283,7 +265,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip post-record scrub (debug only; do not commit unsanitized cassettes)",
     )
-    record_parser.set_defaults(func=cmd_record, target=False, force=False, no_scrub=False)
+    record_parser.set_defaults(func=_run_command, mode="record", force=False, no_scrub=False)
 
     generate_parser = subparsers.add_parser("generate", help="Replay VCR and write expected_output/")
     _add_common_args(generate_parser)
@@ -292,11 +274,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Wipe expected_output/ and test_runtime/ and regenerate data.singer/state.json output",
     )
-    generate_parser.set_defaults(func=cmd_generate, target=False, force=False)
+    generate_parser.set_defaults(func=_run_command, mode="generate", force=False, no_scrub=False)
 
     run_parser = subparsers.add_parser("run", help="Replay VCR and compare against expected_output/")
     _add_common_args(run_parser)
-    run_parser.set_defaults(func=cmd_run, target=False)
+    run_parser.set_defaults(func=_run_command, mode="run", force=False, no_scrub=False)
 
     return parser
 

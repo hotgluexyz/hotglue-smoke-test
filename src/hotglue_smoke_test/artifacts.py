@@ -18,14 +18,22 @@ _CREDENTIAL_KEYS = (
     "token",
 )
 _PLACEHOLDER_VALUES = (
-    {"API_KEY", "YOUR_API_KEY", "PLACEHOLDER", "changeme", "<api_key>", "xxx"}
+    "API_KEY", 
+    "YOUR_API_KEY", 
+    "PLACEHOLDER", 
+    "changeme", 
+    "<api_key>", 
+    "xxx",
 )
 
 
+def case_relpath(testcase: str, test_suite: str | None) -> str:
+    """Relative case id: ``suite/name_test`` or ``name_test``."""
+    return f"{test_suite}/{testcase}" if test_suite else testcase
+
+
 def resolve_case_dir(tests_dir: Path, testcase: str, test_suite: str | None) -> Path:
-    if test_suite:
-        return tests_dir / test_suite / testcase
-    return tests_dir / testcase
+    return tests_dir.joinpath(*case_relpath(testcase, test_suite).split("/"))
 
 
 def cassette_path(case_dir: Path) -> Path:
@@ -79,7 +87,7 @@ def _validate_live_credentials(case_dir: Path) -> None:
         value = config.get(key)
         if not isinstance(value, str) or not value:
             continue
-        if value in _PLACEHOLDER_VALUES or value.upper() == "API_KEY":
+        if value in _PLACEHOLDER_VALUES or value.upper() in _PLACEHOLDER_VALUES:
             _die(
                 f"config.json contains placeholder {key}={value!r}; "
                 "copy live credentials from .secrets/config.json into the case config before recording"

@@ -88,75 +88,65 @@ def _norm_field(key: str) -> str:
 
 # Typed PII generators by normalized field name (casing / snake_case aliases from connectors).
 # Bare "state" omitted — too often workflow status, not geography.
-_EMAIL_FIELDS = frozenset({"email", "billemail", "ticketmatchingemails"})
-_PHONE_FIELDS = frozenset(
-    {
-        "phone",
-        "phonenumber",
-        "telephone",
-        "mobile",
-        "mobilephone",
-        "fax",
-        "homephone",
-        "otherphone",
-        "processedphone",
-        "processedmobile",
-    }
-)
-_IP_FIELDS = frozenset({"clientip", "ipaddress", "ip"})
-_FIRST_NAME_FIELDS = frozenset({"firstname"})
-_LAST_NAME_FIELDS = frozenset({"lastname"})
-_PERSON_NAME_FIELDS = frozenset({"name", "displayname", "fullname", "addressee"})
-_COMPANY_NAME_FIELDS = frozenset({"companyname"})
-_STREET_FIELDS = frozenset(
-    {
-        "address",
-        "address1",
-        "address2",
-        "addressline1",
-        "addressline2",
-        "street",
-        "streetaddress",
-        "freeformaddress",
-        "shiptoaddressline1",
-        "shiptoaddressline2",
-        "selltoaddressline1",
-        "selltoaddressline2",
-        "mailingstreet",
-        "billingstreet",
-        "shippingstreet",
-    }
-)
-_CITY_FIELDS = frozenset(
-    {"city", "shiptocity", "selltocity", "mailingcity", "billingcity", "shippingcity"}
-)
-_POSTAL_FIELDS = frozenset(
-    {
-        "zip",
-        "zipcode",
-        "postalcode",
-        "postcode",
-        "shiptopostcode",
-        "selltopostcode",
-        "mailingpostalcode",
-        "billingpostalcode",
-        "shippingpostalcode",
-    }
-)
-_REGION_FIELDS = frozenset(
-    {
-        "province",
-        "provincecode",
-        "shiptostate",
-        "selltostate",
-        "mailingstate",
-        "billingstate",
-        "shippingstate",
-    }
-)
-_LAT_FIELDS = frozenset({"latitude", "lat"})
-_LON_FIELDS = frozenset({"longitude", "lng", "lon"})
-_BIRTHDATE_FIELDS = frozenset({"birthdate", "dateofbirth", "dob"})
+_EMAIL_FIELDS = {"email", "billemail", "ticketmatchingemails"}
+_PHONE_FIELDS = {
+    "phone",
+    "phonenumber",
+    "telephone",
+    "mobile",
+    "mobilephone",
+    "fax",
+    "homephone",
+    "otherphone",
+    "processedphone",
+    "processedmobile",
+}
+_IP_FIELDS = {"clientip", "ipaddress", "ip"}
+_FIRST_NAME_FIELDS = {"firstname"}
+_LAST_NAME_FIELDS = {"lastname"}
+_PERSON_NAME_FIELDS = {"name", "displayname", "fullname", "addressee"}
+_COMPANY_NAME_FIELDS = {"companyname"}
+_STREET_FIELDS = {
+    "address",
+    "address1",
+    "address2",
+    "addressline1",
+    "addressline2",
+    "street",
+    "streetaddress",
+    "freeformaddress",
+    "shiptoaddressline1",
+    "shiptoaddressline2",
+    "selltoaddressline1",
+    "selltoaddressline2",
+    "mailingstreet",
+    "billingstreet",
+    "shippingstreet",
+}
+_CITY_FIELDS = {"city", "shiptocity", "selltocity", "mailingcity", "billingcity", "shippingcity"}
+_POSTAL_FIELDS = {
+    "zip",
+    "zipcode",
+    "postalcode",
+    "postcode",
+    "shiptopostcode",
+    "selltopostcode",
+    "mailingpostalcode",
+    "billingpostalcode",
+    "shippingpostalcode",
+}
+_REGION_FIELDS = {
+    "province",
+    "provincecode",
+    "shiptostate",
+    "selltostate",
+    "mailingstate",
+    "billingstate",
+    "shippingstate",
+}
+_LAT_FIELDS = {"latitude", "lat"}
+_LON_FIELDS = {"longitude", "lng", "lon"}
+_BIRTHDATE_FIELDS = {"birthdate", "dateofbirth", "dob"}
 # Fall through to uuid4 when scrubbed: account/payment ids, SSN/tax ids, etc.
 
 

@@ -18,7 +18,7 @@ class VCRTapTestRunner(VCRBaseTestRunner):
     def run_launch(self):
         with open(self.output_file_path, "w") as output_file:
             with redirect_stdout(output_file):
-                if self.is_recording:
+                if self.mode == "record":
                     self.launch()
                 else:
                     with patch("time.sleep", return_value=None):
