@@ -14,8 +14,6 @@ from hotglue_smoke_test.vcr.sanitize import (
     scrub_tokens_in_json,
 )
 
-SMOKE_TEST_MODES = {"record", "generate", "run"}
-
 
 class VCRBaseTestRunner(ABC):
     def __init__(self, test_case: str, script_dir: str):
@@ -26,10 +24,6 @@ class VCRBaseTestRunner(ABC):
         self.vcr_cassette_path = os.path.join(self.test_case_path, "fixtures", "vcr.yaml")
 
         self.mode = os.environ.get("SMOKE_TEST_MODE", "run")
-        if self.mode not in SMOKE_TEST_MODES:
-            raise ValueError(
-                f"SMOKE_TEST_MODE must be one of {sorted(SMOKE_TEST_MODES)}, got {self.mode!r}"
-            )
         self.output_file_path = self._resolve_output_path()
 
     @property
