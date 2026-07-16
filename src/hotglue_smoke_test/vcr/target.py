@@ -26,12 +26,6 @@ class VCRTargetTestRunner(VCRBaseTestRunner):
                 sys.stdin = sys.__stdin__
                 sys.stdout = sys.__stdout__
 
-    def vcr_use_cassette(self, filter_query_parameters):
-        return super().vcr_use_cassette(
-            filter_query_parameters,
-            before_record_response=self.scrub_token_from_response,
-        )
-
     def argv(self):
         return [
             self.module(),

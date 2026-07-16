@@ -97,19 +97,6 @@ class VCRBaseTestRunner(ABC):
         runner = cls(test_case, script_dir)
         runner.run_test()
 
-    def scrub_token_from_response(self, response):
-        # Token scrub during record; full sanitize_cassette runs after record completes.
-        try:
-            body = response["body"]["string"].decode("utf-8")
-            data = json.loads(body)
-            if isinstance(data, dict):
-                data = scrub_tokens_in_json(data)
-                response["body"]["string"] = json.dumps(data).encode("utf-8")
-                response["headers"]["Content-Length"] = [str(len(response["body"]["string"]))]
-        except json.JSONDecodeError:
-            pass
-        return response
-
     def sanitize_cassette(self):
         """Default: scrub OAuth tokens from cassette response JSON bodies."""
         def scrub_tokens_only(body: str) -> str:
@@ -123,21 +110,19 @@ class VCRBaseTestRunner(ABC):
 
         sanitize_cassette_file(self.vcr_cassette_path, scrub_response=scrub_tokens_only)
 
-    def vcr_use_cassette(self, filter_query_parameters, before_record_response=None):
-        kwargs = {
-            "decode_compressed_response": True,
-            "filter_headers": ["authorization"],
-            "filter_post_data_parameters": [
+    def vcr_use_cassette(self, filter_query_parameters):
+        return vcr.use_cassette(
+            self.vcr_cassette_path,
+            decode_compressed_response=True,
+            filter_headers=["authorization"],
+            filter_post_data_parameters=[
                 "client_id",
                 "client_secret",
                 "refresh_token",
                 "access_token",
             ],
-            "filter_query_parameters": filter_query_parameters,
-        }
-        if before_record_response is not None:
-            kwargs["before_record_response"] = before_record_response
-        return vcr.use_cassette(self.vcr_cassette_path, **kwargs)
+            filter_query_parameters=filter_query_parameters,
+        )
 
     @abstractmethod
     def module(self) -> str:
