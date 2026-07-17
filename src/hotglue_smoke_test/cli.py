@@ -146,10 +146,11 @@ def _run_command(args: argparse.Namespace) -> int:
 
     connector_dir = Path(args.connector_directory).resolve()
     smoke_test_dir = _resolve_tests_dir(connector_dir)
+    connector_name = connector_dir.name.removeprefix("tap-").removeprefix("target-")
 
     _print_section("Test Configuration")
     _print_status("INFO", f"Mode: {mode}")
-    _print_status("INFO", f"Connector Name: {args.connector_name}")
+    _print_status("INFO", f"Connector Name: {connector_name}")
     _print_status("INFO", f"Case Name: {args.case_name}")
     _print_status("INFO", f"Target Mode: {args.target}")
     _print_status("INFO", f"Connector Directory: {connector_dir}")
@@ -168,7 +169,7 @@ def _run_command(args: argparse.Namespace) -> int:
         try:
             _execute_case(
                 mode,
-                args.connector_name,
+                connector_name,
                 testcase,
                 connector_dir,
                 smoke_test_dir,
@@ -199,8 +200,12 @@ def _run_command(args: argparse.Namespace) -> int:
 
 
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("connector_name", help="Connector name without tap-/target- prefix")
-    parser.add_argument("case_name", help="Test case name ending in _test, or * for all")
+    parser.add_argument(
+        "case_name",
+        nargs="?",
+        default="*",
+        help="Test case name ending in _test, or * for all (default: *)",
+    )
     parser.add_argument(
         "--connector-directory",
         default=".",

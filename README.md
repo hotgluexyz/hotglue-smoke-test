@@ -4,6 +4,8 @@ Smoke-test harness for hotglue taps and targets with **colocated** `__tests__/` 
 
 Three phases: record HTTP (then scrub) → generate data.singer/state.json → run (replay + compare).
 
+Run from the connector repo root (after installing into that venv). Connector name for logs is derived from the directory (`tap-shopify-v2` → `shopify-v2`).
+
 ## Layout (per connector repo)
 
 ```
@@ -27,22 +29,19 @@ pip install "hotglue-smoke-test @ git+https://github.com/hotgluexyz/hotglue-smok
 
 ```bash
 # 1. Record VCR cassette (live API; discards Singer output), then scrub secrets/PII
-hotglue-smoke-test record   shopify-v2 orders_test --connector-directory .
-
+hotglue-smoke-test record orders_test
 
 # 2. Replay cassette → write expected_output/
-hotglue-smoke-test generate shopify-v2 orders_test --connector-directory .
+hotglue-smoke-test generate orders_test
 
-
-# 3. Replay cassette → test_runtime/ → compare (CI uses this)
-hotglue-smoke-test run      shopify-v2 '*'           --connector-directory .
-hotglue-smoke-test run      shopify-v2 orders_test   --connector-directory .
-
+# 3. Replay cassette → test_runtime/ → compare (CI uses bare `run` = all cases)
+hotglue-smoke-test run
+hotglue-smoke-test run orders_test
 ```
 
 `record` scrubs by default after the live HTTP capture (cassette response bodies + connector `record-vcr.py` rules). Use `--no-scrub` only for local debug; do not commit unsanitized cassettes.
 
-Add `--target` for target repos. Add `--force` on `record` or `generate` to overwrite existing artifacts.
+Add `--target` for target repos. Add `--force` on `record` or `generate` to overwrite existing artifacts. Override the repo root with `--connector-directory` only when not running from cwd.
 
 ### `--force` semantics
 
@@ -56,16 +55,16 @@ Add `--target` for target repos. Add `--force` on `record` or `generate` to over
 ### Typical workflow
 
 ```bash
-record  orders_test           # live → fixtures/vcr.yaml → scrub
-generate orders_test          # replay → expected_output/
-run orders_test               # replay → test_runtime/ → diff
+hotglue-smoke-test record orders_test            # live → fixtures/vcr.yaml → scrub
+hotglue-smoke-test generate orders_test          # replay → expected_output/
+hotglue-smoke-test run orders_test               # replay → test_runtime/ → diff
 
-record  --force orders_test   # full re-record + scrub (start over)
-generate orders_test
-run orders_test
+hotglue-smoke-test record --force orders_test    # full re-record + scrub (start over)
+hotglue-smoke-test generate orders_test
+hotglue-smoke-test run orders_test
 
-generate --force orders_test  # refresh data.singer/state.json after connector change (HTTP unchanged)
-run orders_test
+hotglue-smoke-test generate --force orders_test  # refresh data.singer/state.json after connector change (HTTP unchanged)
+hotglue-smoke-test run orders_test
 ```
 
 Connector `__tests__/record-vcr.py`:
