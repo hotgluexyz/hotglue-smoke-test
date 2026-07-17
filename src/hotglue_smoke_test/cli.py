@@ -201,7 +201,11 @@ def _run_command(args: argparse.Namespace) -> int:
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("connector_name", help="Connector name without tap-/target- prefix")
     parser.add_argument("case_name", help="Test case name ending in _test, or * for all")
-    parser.add_argument("--connector-directory", required=True, help="Path to connector repo root")
+    parser.add_argument(
+        "--connector-directory",
+        default=".",
+        help="Path to connector repo root (default: current directory)",
+    )
     parser.add_argument("--target", action="store_true", help="Run as target")
 
 
