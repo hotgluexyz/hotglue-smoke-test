@@ -8,7 +8,7 @@ from typing import Any, Callable
 
 import yaml
 
-# Top-level response-body credential keys; extend when new auth patterns appear.
+# Credential keys scrubbed at any depth in response JSON; extend when new auth patterns appear.
 TOKEN_KEYS = (
     "access_token",
     "refresh_token",
@@ -38,12 +38,14 @@ def write_cassette(path: str | Path, data: dict) -> None:
         yaml.safe_dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
 
-def scrub_tokens_in_json(data: dict) -> dict:
-    """Replace top-level credential values with the key name."""
-    for key in TOKEN_KEYS:
-        if key in data:
-            data[key] = key
-    return data
+def scrub_tokens_in_json(data: Any) -> Any:
+    """Replace credential values (any depth) with the key name."""
+    return scrub_json_tree(
+        data,
+        scrub_keys=set(TOKEN_KEYS),
+        preserve_keys=set(),
+        replace_fn=lambda key, _value: key,
+    )
 
 
 def scrub_json_tree(

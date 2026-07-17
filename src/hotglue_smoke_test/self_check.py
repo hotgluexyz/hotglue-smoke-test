@@ -44,7 +44,11 @@ def _check_sanitize_round_trip(tmp: Path) -> None:
             "Email": "Alias@Example.com",
             "first_name": "Ada",
             "updatedAt": "2026-07-07T15:00:00Z",
-            "nested": {"email": "real@example.com", "phone": "+15551234"},
+            "nested": {
+                "email": "real@example.com",
+                "phone": "+15551234",
+                "access_token": "nested-secret",
+            },
         }
     )
     write_cassette(
@@ -78,6 +82,7 @@ def _check_sanitize_round_trip(tmp: Path) -> None:
     data = load_cassette(cassette_path)
     scrubbed = json.loads(data["interactions"][0]["response"]["body"]["string"])
     assert scrubbed["access_token"] == "access_token"
+    assert scrubbed["nested"]["access_token"] == "access_token"
     assert scrubbed["updatedAt"] == "2026-07-07T15:00:00Z"
     assert scrubbed["email"] != "real@example.com"
     assert "@" in scrubbed["Email"] and scrubbed["Email"] != "Alias@Example.com"
