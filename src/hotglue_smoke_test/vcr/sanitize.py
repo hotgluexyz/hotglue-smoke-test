@@ -153,26 +153,23 @@ _BIRTHDATE_FIELDS = {"birthdate", "dateofbirth", "dob"}
 
 
 def make_faker_replace_fn(faker, cache: dict) -> Callable[[str, Any], Any]:
-    """Deterministic Faker replacement keyed by (field, original value)."""
+    """Deterministic Faker replacement: same real value → same fake (any field)."""
 
     def replace(key: str, value: Any) -> Any:
         if value is None:
             return None
-        cache_key = (key, value if not isinstance(value, list) else tuple(value))
-        if cache_key in cache:
+        try:
+            cache_key = tuple(value) if isinstance(value, list) else value
+            hash(cache_key)
+        except TypeError:
+            # list/dict values aren't hashable — skip cache (still scrub).
+            cache_key = None
+        if cache_key is not None and cache_key in cache:
             return cache[cache_key]
 
         field = _norm_field(key)
 
-        if field == "formatted":
-            fake = (
-                [faker.street_address() if isinstance(i, str) else i for i in value]
-                if isinstance(value, list)
-                else faker.street_address()
-            )
-        elif field == "formattedarea":
-            fake = f"{faker.city()}, {faker.state_abbr()}, {faker.country()}"
-        elif field in _EMAIL_FIELDS:
+        if field in _EMAIL_FIELDS:
             fake = faker.email()
         elif field in _PHONE_FIELDS:
             fake = faker.phone_number()
@@ -207,7 +204,8 @@ def make_faker_replace_fn(faker, cache: dict) -> Callable[[str, Any], Any]:
         else:
             fake = value
 
-        cache[cache_key] = fake
+        if cache_key is not None:
+            cache[cache_key] = fake
         return fake
 
     return replace
