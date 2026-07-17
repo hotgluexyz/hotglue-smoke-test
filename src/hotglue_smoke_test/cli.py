@@ -58,18 +58,10 @@ def _discover_cases(test_dir: Path, case_name: str) -> list[str]:
     return [case_name]
 
 
-def _python_executable(connector_dir: Path) -> str:
-    venv_python = connector_dir / ".venv" / "bin" / "python"
-    if venv_python.is_file():
-        return str(venv_python)
-    return sys.executable
-
-
 def _run_record_vcr(
     connector_dir: Path,
     tests_dir: Path,
     testcase: str,
-    python_exe: str,
     mode: str,
     no_scrub: bool = False,
 ) -> None:
@@ -83,7 +75,7 @@ def _run_record_vcr(
         f"command [SMOKE_TEST_MODE={mode} PYTHONPATH={env['PYTHONPATH']} "
         f"python {record_vcr} {testcase}]"
     )
-    subprocess.run([python_exe, str(record_vcr), testcase], env=env, check=True)
+    subprocess.run([sys.executable, str(record_vcr), testcase], env=env, check=True)
 
 
 def _run_comparison(smoke_test_dir: Path, case_name: str, is_target: bool) -> None:
@@ -121,7 +113,6 @@ def _execute_case(
     connector_dir: Path,
     smoke_test_dir: Path,
     is_target: bool,
-    python_exe: str,
     force: bool,
     no_scrub: bool = False,
 ) -> None:
@@ -140,7 +131,6 @@ def _execute_case(
         connector_dir,
         smoke_test_dir,
         testcase,
-        python_exe,
         mode,
         no_scrub=no_scrub,
     )
@@ -165,7 +155,6 @@ def _run_command(args: argparse.Namespace) -> int:
     _print_status("INFO", f"Connector Directory: {connector_dir}")
     _print_status("INFO", f"Test Directory: {smoke_test_dir}")
 
-    python_exe = _python_executable(connector_dir)
     cases = _discover_cases(smoke_test_dir, args.case_name)
 
     _print_section("Starting Execution")
@@ -184,7 +173,6 @@ def _run_command(args: argparse.Namespace) -> int:
                 connector_dir,
                 smoke_test_dir,
                 args.target,
-                python_exe,
                 args.force,
                 no_scrub=args.no_scrub,
             )
