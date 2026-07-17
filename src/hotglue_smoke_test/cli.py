@@ -12,8 +12,6 @@ from pathlib import Path
 import pytest
 
 from hotglue_smoke_test.artifacts import (
-    case_relpath,
-    resolve_case_dir,
     validate_generate,
     validate_record,
     validate_run,
@@ -46,12 +44,11 @@ def _resolve_tests_dir(connector_dir: Path) -> Path:
     return tests_dir
 
 
-def _discover_cases(test_dir: Path, case_name: str, test_suite: str | None) -> list[str]:
+def _discover_cases(test_dir: Path, case_name: str) -> list[str]:
     if case_name == "*":
-        pattern_dir = test_dir / test_suite if test_suite else test_dir
         return sorted(
             p.name
-            for p in pattern_dir.iterdir()
+            for p in test_dir.iterdir()
             if p.is_dir() and p.name.endswith("_test")
         )
 
@@ -68,31 +65,15 @@ def _python_executable(connector_dir: Path) -> str:
     return sys.executable
 
 
-def _load_ci_env(connector_dir: Path) -> None:
-    ci_env = connector_dir / "ci.env"
-    if not ci_env.is_file():
-        return
-    for line in ci_env.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        if line.startswith("export "):
-            line = line[len("export ") :].lstrip()
-        key, _, value = line.partition("=")
-        os.environ.setdefault(key, value)
-
-
 def _run_record_vcr(
     connector_dir: Path,
     tests_dir: Path,
     testcase: str,
-    test_suite: str | None,
     python_exe: str,
     mode: str,
     no_scrub: bool = False,
 ) -> None:
     record_vcr = tests_dir / "record-vcr.py"
-    case = case_relpath(testcase, test_suite)
     env = os.environ.copy()
     env["PYTHONPATH"] = str(connector_dir)
     env["SMOKE_TEST_MODE"] = mode
@@ -100,9 +81,9 @@ def _run_record_vcr(
         env["SMOKE_TEST_NO_SCRUB"] = "1"
     print(
         f"command [SMOKE_TEST_MODE={mode} PYTHONPATH={env['PYTHONPATH']} "
-        f"python {record_vcr} {case}]"
+        f"python {record_vcr} {testcase}]"
     )
-    subprocess.run([python_exe, str(record_vcr), case], env=env, check=True)
+    subprocess.run([python_exe, str(record_vcr), testcase], env=env, check=True)
 
 
 def _run_comparison(smoke_test_dir: Path, case_name: str, is_target: bool) -> None:
@@ -140,12 +121,11 @@ def _execute_case(
     connector_dir: Path,
     smoke_test_dir: Path,
     is_target: bool,
-    test_suite: str | None,
     python_exe: str,
     force: bool,
     no_scrub: bool = False,
 ) -> None:
-    case_dir = resolve_case_dir(smoke_test_dir, testcase, test_suite)
+    case_dir = smoke_test_dir / testcase
     _prepare_case(mode, case_dir, is_target, force)
 
     label = {
@@ -160,16 +140,14 @@ def _execute_case(
         connector_dir,
         smoke_test_dir,
         testcase,
-        test_suite,
         python_exe,
         mode,
         no_scrub=no_scrub,
     )
 
     if mode == "run":
-        case_name = case_relpath(testcase, test_suite)
-        _print_status("INFO", f"Running comparison for case {case_name}")
-        _run_comparison(smoke_test_dir, case_name, is_target)
+        _print_status("INFO", f"Running comparison for case {testcase}")
+        _run_comparison(smoke_test_dir, testcase, is_target)
 
 
 def _run_command(args: argparse.Namespace) -> int:
@@ -178,7 +156,6 @@ def _run_command(args: argparse.Namespace) -> int:
 
     connector_dir = Path(args.connector_directory).resolve()
     smoke_test_dir = _resolve_tests_dir(connector_dir)
-    _load_ci_env(connector_dir)
 
     _print_section("Test Configuration")
     _print_status("INFO", f"Mode: {mode}")
@@ -189,8 +166,7 @@ def _run_command(args: argparse.Namespace) -> int:
     _print_status("INFO", f"Test Directory: {smoke_test_dir}")
 
     python_exe = _python_executable(connector_dir)
-    test_suite = os.environ.get("TEST_SUITE")
-    cases = _discover_cases(smoke_test_dir, args.case_name, test_suite)
+    cases = _discover_cases(smoke_test_dir, args.case_name)
 
     _print_section("Starting Execution")
     if args.case_name == "*":
@@ -208,7 +184,6 @@ def _run_command(args: argparse.Namespace) -> int:
                 connector_dir,
                 smoke_test_dir,
                 args.target,
-                test_suite,
                 python_exe,
                 args.force,
                 no_scrub=args.no_scrub,

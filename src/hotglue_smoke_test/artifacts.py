@@ -10,15 +10,6 @@ from pathlib import Path
 from hotglue_smoke_test.vcr.sanitize import TOKEN_KEYS
 
 
-def case_relpath(testcase: str, test_suite: str | None) -> str:
-    """Relative case id: ``suite/name_test`` or ``name_test``."""
-    return f"{test_suite}/{testcase}" if test_suite else testcase
-
-
-def resolve_case_dir(tests_dir: Path, testcase: str, test_suite: str | None) -> Path:
-    return tests_dir.joinpath(*case_relpath(testcase, test_suite).split("/"))
-
-
 def cassette_path(case_dir: Path) -> Path:
     return case_dir / "fixtures" / "vcr.yaml"
 
