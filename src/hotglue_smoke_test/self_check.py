@@ -34,6 +34,15 @@ def _assert_raises_system_exit(fn) -> None:
     raise AssertionError("expected SystemExit")
 
 
+def _swallow_success_system_exit(fn) -> None:
+    """Same contract as VCRBaseTestRunner.run_test around launch()."""
+    try:
+        fn()
+    except SystemExit as exc:
+        if exc.code not in (0, None):
+            raise
+
+
 def _check_sanitize_round_trip(tmp: Path) -> None:
     tmp.mkdir(parents=True, exist_ok=True)
     cassette_path = tmp / "vcr.yaml"
@@ -147,6 +156,14 @@ def main() -> None:
         assert not (case / "test_runtime").exists()
 
         _check_sanitize_round_trip(Path(tmp) / "sanitize_check")
+
+        def _exit(code):
+            raise SystemExit(code)
+
+        _swallow_success_system_exit(lambda: None)
+        _swallow_success_system_exit(lambda: _exit(0))
+        _swallow_success_system_exit(lambda: _exit(None))
+        _assert_raises_system_exit(lambda: _swallow_success_system_exit(lambda: _exit(1)))
 
     print("self_check: ok")
 

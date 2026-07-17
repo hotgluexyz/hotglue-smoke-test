@@ -48,7 +48,6 @@ class VCRBaseTestRunner(ABC):
             with open(self.test_config_path) as config_file:
                 test_config = json.load(config_file)
 
-        os.environ["IS_TEST"] = "true"
         if "ignore_streams" in test_config:
             os.environ["IGNORE_STREAMS"] = ",".join(test_config["ignore_streams"])
             print(f"IGNORE_STREAMS set to: {os.environ['IGNORE_STREAMS']}")
@@ -76,7 +75,12 @@ class VCRBaseTestRunner(ABC):
             freeze_datetime = test_config.get("freeze_time")
             ctx = freeze_time(freeze_datetime) if freeze_datetime else nullcontext()
             with ctx:
-                self.run_launch()
+                # Click CLIs raise SystemExit(0) on success; swallow so post-record scrub runs.
+                try:
+                    self.run_launch()
+                except SystemExit as exc:
+                    if exc.code not in (0, None):
+                        raise
 
         if self.mode == "record":
             print(f"VCR cassette recorded: {self.vcr_cassette_path}")
