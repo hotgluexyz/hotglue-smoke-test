@@ -9,6 +9,7 @@ import vcr
 from freezegun import freeze_time
 
 from hotglue_smoke_test.vcr.sanitize import (
+    TOKEN_KEYS,
     sanitize_cassette_file,
     scrub_tokens_in_json,
     sanitize_config_credentials,
@@ -16,6 +17,8 @@ from hotglue_smoke_test.vcr.sanitize import (
 
 
 class VCRBaseTestRunner(ABC):
+    FILTER_HEADERS = ["authorization"]
+
     def __init__(self, test_case: str, script_dir: str):
         self.test_case = test_case
         self.script_dir = script_dir
@@ -120,13 +123,8 @@ class VCRBaseTestRunner(ABC):
         return vcr.use_cassette(
             self.vcr_cassette_path,
             decode_compressed_response=True,
-            filter_headers=["authorization"],
-            filter_post_data_parameters=[
-                "client_id",
-                "client_secret",
-                "refresh_token",
-                "access_token",
-            ],
+            filter_headers=list(self.FILTER_HEADERS),
+            filter_post_data_parameters=list(TOKEN_KEYS),
             filter_query_parameters=filter_query_parameters,
         )
 
