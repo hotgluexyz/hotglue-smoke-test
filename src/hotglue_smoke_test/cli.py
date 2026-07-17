@@ -52,8 +52,11 @@ def _discover_cases(test_dir: Path, case_name: str) -> list[str]:
             if p.is_dir() and p.name.endswith("_test")
         )
 
-    if not case_name.endswith("_test"):
-        print("Error: casename must either end in '_test' or be '*'", file=sys.stderr)
+    if not case_name.endswith("_test") or Path(case_name).name != case_name:
+        print(
+            "Error: casename must be a single segment ending in '_test', or '*'",
+            file=sys.stderr,
+        )
         sys.exit(1)
     return [case_name]
 
