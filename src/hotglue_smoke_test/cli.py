@@ -34,10 +34,6 @@ def _print_status(status: str, message: str) -> None:
     print(f"[{timestamp}] {status}: {message}")
 
 
-def _resolve_connector_dir(connector_directory: str) -> Path:
-    return Path(connector_directory).resolve()
-
-
 def _resolve_tests_dir(connector_dir: Path) -> Path:
     tests_dir = connector_dir / "__tests__"
     record_vcr = tests_dir / "record-vcr.py"
@@ -180,7 +176,7 @@ def _run_command(args: argparse.Namespace) -> int:
     mode = args.mode
     os.environ.setdefault("TZ", "America/New_York")
 
-    connector_dir = _resolve_connector_dir(args.connector_directory)
+    connector_dir = Path(args.connector_directory).resolve()
     smoke_test_dir = _resolve_tests_dir(connector_dir)
     _load_ci_env(connector_dir)
 
@@ -242,11 +238,7 @@ def _run_command(args: argparse.Namespace) -> int:
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("connector_name", help="Connector name without tap-/target- prefix")
     parser.add_argument("case_name", help="Test case name ending in _test, or * for all")
-    parser.add_argument(
-        "--connector-directory",
-        required=True,
-        help="Path to connector repo root",
-    )
+    parser.add_argument("--connector-directory", required=True, help="Path to connector repo root")
     parser.add_argument("--target", action="store_true", help="Run as target")
 
 
