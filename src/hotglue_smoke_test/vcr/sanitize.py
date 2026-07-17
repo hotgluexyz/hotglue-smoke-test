@@ -84,12 +84,9 @@ def scrub_json_tree(
     return obj
 
 
-def _norm_field(key: str) -> str:
-    return key.replace("_", "").lower()
+# Typed PII generators by normalized field name (casing / snake_case / dotted aliases).
+# Dotted keys use the last segment (BILLTO.FIRSTNAME → firstname). Bare "state" omitted.
 
-
-# Typed PII generators by normalized field name (casing / snake_case aliases from connectors).
-# Bare "state" omitted — too often workflow status, not geography.
 _EMAIL_FIELDS = {"email", "billemail", "ticketmatchingemails"}
 _PHONE_FIELDS = {
     "phone",
@@ -167,7 +164,7 @@ def make_faker_replace_fn(faker, cache: dict) -> Callable[[str, Any], Any]:
         if cache_key is not None and cache_key in cache:
             return cache[cache_key]
 
-        field = _norm_field(key)
+        field = key.split(".")[-1].replace("_", "").lower()
 
         if field in _EMAIL_FIELDS:
             fake = faker.email()

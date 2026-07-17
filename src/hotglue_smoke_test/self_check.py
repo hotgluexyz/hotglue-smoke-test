@@ -112,18 +112,18 @@ def _check_sanitize_round_trip(tmp: Path) -> None:
     assert again_data["email"] == scrubbed["email"]
     assert again_data["updatedAt"] == "keep"
 
-    # same real token → same fake across different fields
-    Faker.seed(7)
-    cross = scrub_response_json(
-        json.dumps({"last_name": "Rosa", "name": "Rosa", "displayName": "Rosa"}),
-        {"last_name", "name", "displayName"},
+    # dotted Intacct-style keys use last segment for faker type
+    Faker.seed(11)
+    dotted = scrub_response_json(
+        json.dumps({"BILLTO.FIRSTNAME": "Ada"}),
+        {"BILLTO.FIRSTNAME"},
         set(),
         Faker(),
         {},
     )
-    cross_data = json.loads(cross)
-    assert cross_data["last_name"] == cross_data["name"] == cross_data["displayName"]
-    assert cross_data["last_name"] != "Rosa"
+    dotted_data = json.loads(dotted)
+    assert dotted_data["BILLTO.FIRSTNAME"] != "Ada"
+    assert dotted_data["BILLTO.FIRSTNAME"].isalpha()
 
 
 def main() -> None:
