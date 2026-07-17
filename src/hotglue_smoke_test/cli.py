@@ -74,6 +74,8 @@ def _run_record_vcr(
     env["SMOKE_TEST_MODE"] = mode
     if no_scrub:
         env["SMOKE_TEST_NO_SCRUB"] = "1"
+    else:
+        env.pop("SMOKE_TEST_NO_SCRUB", None)
     print(
         f"command [SMOKE_TEST_MODE={mode} PYTHONPATH={env['PYTHONPATH']} "
         f"python {record_vcr} {testcase}]"
