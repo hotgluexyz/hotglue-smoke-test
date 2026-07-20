@@ -1,11 +1,11 @@
-name: Lint
+name: Run tests
 
 on:
   pull_request:
     branches: [main, master]
 
 jobs:
-  lint:
+  tox-py:
     runs-on: ubuntu-latest
 
     steps:
@@ -20,5 +20,5 @@ jobs:
       - name: Install tox
         run: pip install tox
 
-      - name: Run lint
-        run: tox -e ruff
+      - name: Run tox -e py
+        run: tox -e py
