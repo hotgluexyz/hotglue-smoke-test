@@ -280,13 +280,22 @@ def sanitize_config_credentials(case_dir: Path | str) -> None:
     if not config_path.is_file():
         return
     config = json.loads(config_path.read_text())
+    live = {}
     for key in TOKEN_KEYS:
         value = config.get(key)
         if isinstance(value, str) and value:
+            live[key] = value
             config[key] = value[:3] + "***"
         elif isinstance(value, int):
-            s = str(value)
-            config[key] = s[:3] + "***"
-    #redact the config file after the changes are made
+            live[key] = value
+            config[key] = str(value)[:3] + "***"
+    if live:
+        # so rotated tokens from the live record are not lost when the file is scrubbed
+        print("-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-")
+        print("Live credentials: ")
+        print(json.dumps(live, indent=2))
+        print("These credentials were scrubbed.")
+        print("Save it to reuse on another test record")
+        print("-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-")
     config_path.write_text(json.dumps(config, indent=4) + "\n")
 
