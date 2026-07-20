@@ -280,7 +280,6 @@ def sanitize_config_credentials(case_dir: Path | str) -> None:
     if not config_path.is_file():
         return
     config = json.loads(config_path.read_text())
-    changed = False
     for key in TOKEN_KEYS:
         value = config.get(key)
         if isinstance(value, str) and value:
