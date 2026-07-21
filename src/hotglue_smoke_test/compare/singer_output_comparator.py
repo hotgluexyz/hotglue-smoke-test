@@ -279,7 +279,7 @@ class SingerOutputComparator:
             f"Expected: {len(expected_records)}, Actual: {len(actual_records)}"
         )
 
-        print(f"SUCCESS!! Stream [{stream_name}], Count   matched successfully; Expected: {len(expected_records)}, Actual: {len(actual_records)} ")
+        print(f"SUCCESS!! Stream [{stream_name}], Count matched successfully; Expected: {len(expected_records)}, Actual: {len(actual_records)} ")
 
     def _validate_no_duplicates(self, stream_name, records, key_attributes):
         """
