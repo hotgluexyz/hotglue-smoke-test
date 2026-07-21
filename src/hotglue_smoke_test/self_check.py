@@ -136,6 +136,20 @@ def _check_sanitize_round_trip(tmp: Path) -> None:
     assert dotted_data["BILLTO.FIRSTNAME"] != "Ada"
     assert dotted_data["BILLTO.FIRSTNAME"].isalpha()
 
+    # array-rooted responses must still redact TOKEN_KEYS (not skip / preserve live)
+    Faker.seed(13)
+    arr = json.loads(
+        scrub_response_json(
+            json.dumps([{"api_key": "secret-live-key", "name": "Ada"}]),
+            set(),
+            Faker(),
+            {},
+            token_keys,
+        )
+    )
+    assert arr[0]["api_key"] == "sec***"
+    assert arr[0]["name"] != "Ada"
+
 
 def main() -> None:
 

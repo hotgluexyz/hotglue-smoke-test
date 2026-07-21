@@ -256,8 +256,7 @@ def scrub_response_json(
         return body
 
     # Redact on real values first; preserve those keys so hard scrub won't rewrite them.
-    if isinstance(data, dict):
-        data = scrub_tokens_in_json(data, token_keys)
+    data = scrub_tokens_in_json(data, token_keys)
     data = scrub_json_tree(
         data,
         preserve_keys=preserve_keys | token_keys,
