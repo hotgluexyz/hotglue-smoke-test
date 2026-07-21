@@ -8,85 +8,8 @@ from typing import Any, Callable
 
 import yaml
 
-# Credential keys scrubbed at any depth in response JSON; extend when new auth patterns appear.
-TOKEN_KEYS = (
-    "access_token",
-    "refresh_token",
-    "api_key",
-    "api_secret",
-    "auth_token",
-    "client_id",
-    "client_secret",
-    "password",
-    "token",
-    "sender_password",
-    "user_password",
-    "ns_consumer_key",
-    "ns_consumer_secret",
-    "ns_token_key",
-    "ns_token_secret",
-)
-
-
-def load_cassette(path: str | Path) -> dict:
-    with open(path) as f:
-        return yaml.safe_load(f)
-
-
-def write_cassette(path: str | Path, data: dict) -> None:
-    with open(path, "w") as f:
-        yaml.safe_dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
-
-
-def scrub_tokens_in_json(data: Any) -> Any:
-    """Replace credential values (any depth) with the key name."""
-    return scrub_json_tree(
-        data,
-        scrub_keys=set(TOKEN_KEYS),
-        preserve_keys=set(),
-        replace_fn=lambda key, _value: key,
-    )
-
-
-def scrub_json_tree(
-    obj: Any,
-    *,
-    scrub_keys: set[str],
-    preserve_keys: set[str],
-    replace_fn: Callable[[str, Any], Any],
-) -> Any:
-    """Recursively scrub JSON values by key name. preserve_keys win over scrub_keys."""
-    if isinstance(obj, dict):
-        out = {}
-        for key, value in obj.items():
-            if key in preserve_keys:
-                out[key] = value
-            elif key in scrub_keys:
-                out[key] = replace_fn(key, value)
-            else:
-                out[key] = scrub_json_tree(
-                    value,
-                    scrub_keys=scrub_keys,
-                    preserve_keys=preserve_keys,
-                    replace_fn=replace_fn,
-                )
-        return out
-    if isinstance(obj, list):
-        return [
-            scrub_json_tree(
-                item,
-                scrub_keys=scrub_keys,
-                preserve_keys=preserve_keys,
-                replace_fn=replace_fn,
-            )
-            for item in obj
-        ]
-    return obj
-
-
 # Typed PII generators by normalized field name (casing / snake_case / dotted aliases).
 # Dotted keys use the last segment (BILLTO.FIRSTNAME → firstname). Bare "state" omitted.
-
 _EMAIL_FIELDS = {"email", "billemail", "ticketmatchingemails"}
 _PHONE_FIELDS = {
     "phone",
@@ -146,7 +69,112 @@ _REGION_FIELDS = {
 _LAT_FIELDS = {"latitude", "lat"}
 _LON_FIELDS = {"longitude", "lng", "lon"}
 _BIRTHDATE_FIELDS = {"birthdate", "dateofbirth", "dob"}
-# Fall through to uuid4 when scrubbed: account/payment ids, SSN/tax ids, etc.
+# If the key isn't in a typed map above, fallback to scrubbing by value type.
+
+
+def load_cassette(path: str | Path) -> dict:
+    with open(path) as f:
+        return yaml.safe_load(f)
+
+
+def write_cassette(path: str | Path, data: dict) -> None:
+    with open(path, "w") as f:
+        yaml.safe_dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+
+def redact_credential(value: Any) -> Any:
+    """Same placeholder shape as config.json credential scrub."""
+    if isinstance(value, str) and value:
+        return value[:3] + "***"
+    if isinstance(value, int):
+        return str(value)[:3] + "***"
+    return value
+
+
+def scrub_tokens_in_json(data: Any, token_keys: set[str]) -> Any:
+    """Replace credential values (any depth) with a stable prefix*** placeholder."""
+    if isinstance(data, dict):
+        out = {}
+        for key, value in data.items():
+            if key in token_keys:
+                out[key] = redact_credential(value)
+            else:
+                out[key] = scrub_tokens_in_json(value, token_keys)
+        return out
+    if isinstance(data, list):
+        return [scrub_tokens_in_json(item, token_keys) for item in data]
+    return data
+
+
+def scrub_json_tree(
+    obj: Any,
+    *,
+    preserve_keys: set[str],
+    replace_fn: Callable[[str, Any], Any],
+) -> Any:
+    """Recursively scrub JSON leaves; preserve_keys keep their values as-is."""
+    if isinstance(obj, dict):
+        out = {}
+        for key, value in obj.items():
+            if key in preserve_keys:
+                out[key] = value
+            elif isinstance(value, dict):
+                out[key] = scrub_json_tree(
+                    value,
+                    preserve_keys=preserve_keys,
+                    replace_fn=replace_fn,
+                )
+            elif isinstance(value, list):
+                out[key] = _scrub_list(
+                    value,
+                    key=key,
+                    preserve_keys=preserve_keys,
+                    replace_fn=replace_fn,
+                )
+            else:
+                out[key] = replace_fn(key, value)
+        return out
+    if isinstance(obj, list):
+        return [
+            scrub_json_tree(
+                item,
+                preserve_keys=preserve_keys,
+                replace_fn=replace_fn,
+            )
+            for item in obj
+        ]
+    return obj
+
+
+def _scrub_list(
+    values: list,
+    *,
+    key: str,
+    preserve_keys: set[str],
+    replace_fn: Callable[[str, Any], Any],
+) -> list:
+    out = []
+    for item in values:
+        if isinstance(item, dict):
+            out.append(
+                scrub_json_tree(
+                    item,
+                    preserve_keys=preserve_keys,
+                    replace_fn=replace_fn,
+                )
+            )
+        elif isinstance(item, list):
+            out.append(
+                _scrub_list(
+                    item,
+                    key=key,
+                    preserve_keys=preserve_keys,
+                    replace_fn=replace_fn,
+                )
+            )
+        else:
+            out.append(replace_fn(key, item))
+    return out
 
 
 def make_faker_replace_fn(faker, cache: dict) -> Callable[[str, Any], Any]:
@@ -156,8 +184,10 @@ def make_faker_replace_fn(faker, cache: dict) -> Callable[[str, Any], Any]:
         if value is None:
             return None
         try:
-            cache_key = tuple(value) if isinstance(value, list) else value
-            hash(cache_key)
+            raw_key = tuple(value) if isinstance(value, list) else value
+            hash(raw_key)
+            # include type: bool True/False must not collide with int 1/0
+            cache_key = (type(value), raw_key)
         except TypeError:
             # list/dict values aren't hashable — skip cache (still scrub).
             cache_key = None
@@ -194,12 +224,16 @@ def make_faker_replace_fn(faker, cache: dict) -> Callable[[str, Any], Any]:
             fake = float(faker.longitude())
         elif field in _BIRTHDATE_FIELDS:
             fake = faker.date()
-        elif isinstance(value, str):
-            fake = faker.uuid4()
+        elif isinstance(value, bool):
+            fake = faker.pybool()
+        elif isinstance(value, int):
+            fake = faker.random_int()
+        elif isinstance(value, float):
+            fake = float(faker.pyfloat())
         elif isinstance(value, list):
-            fake = [replace(key, item) if isinstance(item, str) else item for item in value]
-        else:
-            fake = value
+            fake = [replace(key, item) for item in value]
+        else: # isinstance(value, str):
+            fake = f"-Fallback-scrubbed-{faker.pystr(min_chars=len(value), max_chars=len(value))}"
 
         if cache_key is not None:
             cache[cache_key] = fake
@@ -210,24 +244,23 @@ def make_faker_replace_fn(faker, cache: dict) -> Callable[[str, Any], Any]:
 
 def scrub_response_json(
     body: str,
-    scrub_keys: set[str],
     preserve_keys: set[str],
     faker,
     cache: dict,
+    token_keys: set[str],
 ) -> str:
-    """Parse response JSON, scrub tokens + keyed fields, re-serialize."""
+    """Parse response JSON, redact tokens, default-scrub other leaves, re-serialize."""
     try:
         data = json.loads(body)
     except json.JSONDecodeError:
         return body
 
+    # Redact on real values first; preserve those keys so hard scrub won't rewrite them.
     if isinstance(data, dict):
-        data = scrub_tokens_in_json(data)
-
+        data = scrub_tokens_in_json(data, token_keys)
     data = scrub_json_tree(
         data,
-        scrub_keys=scrub_keys,
-        preserve_keys=preserve_keys,
+        preserve_keys=preserve_keys | token_keys,
         replace_fn=make_faker_replace_fn(faker, cache),
     )
     return json.dumps(data)
@@ -274,21 +307,22 @@ def sanitize_cassette_file(
 
     write_cassette(path, cassette)
 
-def sanitize_config_credentials(case_dir: Path | str) -> None:
+def sanitize_config_credentials(
+    case_dir: Path | str,
+    token_keys: list[str] | tuple[str, ...],
+) -> None:
     """Replace live credential values in case config.json with a safe placeholder."""
     config_path = Path(case_dir) / "config.json"
     if not config_path.is_file():
         return
     config = json.loads(config_path.read_text())
     live = {}
-    for key in TOKEN_KEYS:
+    for key in token_keys:
         value = config.get(key)
-        if isinstance(value, str) and value:
+        redacted = redact_credential(value)
+        if redacted is not value:
             live[key] = value
-            config[key] = value[:3] + "***"
-        elif isinstance(value, int):
-            live[key] = value
-            config[key] = str(value)[:3] + "***"
+            config[key] = redacted
     if live:
         # so rotated tokens from the live record are not lost when the file is scrubbed
         print("-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-")

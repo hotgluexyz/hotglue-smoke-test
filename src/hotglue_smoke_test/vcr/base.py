@@ -6,18 +6,36 @@ from abc import ABC, abstractmethod
 from contextlib import nullcontext
 
 import vcr
+from faker import Faker
 from freezegun import freeze_time
 
 from hotglue_smoke_test.vcr.sanitize import (
-    TOKEN_KEYS,
     sanitize_cassette_file,
-    scrub_tokens_in_json,
     sanitize_config_credentials,
+    scrub_response_json,
 )
 
 
 class VCRBaseTestRunner(ABC):
     FILTER_HEADERS = ["authorization"]
+    PRESERVE_KEYS: set[str] = set()
+    TOKEN_KEYS = [
+        "access_token",
+        "refresh_token",
+        "api_key",
+        "api_secret",
+        "auth_token",
+        "client_id",
+        "client_secret",
+        "password",
+        "token",
+        "sender_password",
+        "user_password",
+        "ns_consumer_key",
+        "ns_consumer_secret",
+        "ns_token_key",
+        "ns_token_secret",
+    ]
 
     def __init__(self, test_case: str, script_dir: str):
         self.test_case = test_case
@@ -91,7 +109,7 @@ class VCRBaseTestRunner(ABC):
                 print("Skipping cassette scrub (--no-scrub)")
             else:
                 self.sanitize_cassette()
-                sanitize_config_credentials(self.test_case_path)
+                sanitize_config_credentials(self.test_case_path, self.TOKEN_KEYS)
                 print(f"VCR cassette sanitized: {self.vcr_cassette_path}")
         else:
             print(f"Captured output written to: {self.output_file_path}")
@@ -107,24 +125,23 @@ class VCRBaseTestRunner(ABC):
         runner.run_test()
 
     def sanitize_cassette(self):
-        """Default: scrub OAuth tokens from cassette response JSON bodies."""
-        def scrub_tokens_only(body: str) -> str:
-            try:
-                data = json.loads(body)
-            except json.JSONDecodeError:
-                return body
-            if isinstance(data, dict):
-                data = scrub_tokens_in_json(data)
-            return json.dumps(data)
-
-        sanitize_cassette_file(self.vcr_cassette_path, scrub_response=scrub_tokens_only)
+        """Default-scrub response JSON leaves; PRESERVE_KEYS stay real. Tokens scrubbed after."""
+        faker = Faker()
+        Faker.seed(hash(self.test_case) & 0xFFFFFFFF)
+        cache = {}
+        sanitize_cassette_file(
+            self.vcr_cassette_path,
+            scrub_response=lambda body: scrub_response_json(
+                body, set(self.PRESERVE_KEYS), faker, cache, set(self.TOKEN_KEYS)
+            ),
+        )
 
     def vcr_use_cassette(self, filter_query_parameters):
         return vcr.use_cassette(
             self.vcr_cassette_path,
             decode_compressed_response=True,
             filter_headers=list(self.FILTER_HEADERS),
-            filter_post_data_parameters=list(TOKEN_KEYS),
+            filter_post_data_parameters=list(self.TOKEN_KEYS),
             filter_query_parameters=filter_query_parameters,
         )
 

@@ -7,7 +7,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from hotglue_smoke_test.vcr.sanitize import TOKEN_KEYS
+from hotglue_smoke_test.vcr.base import VCRBaseTestRunner
 
 
 def cassette_path(case_dir: Path) -> Path:
@@ -57,7 +57,7 @@ def _validate_live_credentials(case_dir: Path) -> None:
     if not config_path.is_file():
         return
     config = json.loads(config_path.read_text())
-    for key in TOKEN_KEYS:
+    for key in VCRBaseTestRunner.TOKEN_KEYS:
         value = config.get(key)
         if not isinstance(value, str) or not value:
             #int were converted to strings on the sanitize_config_credentials

@@ -16,6 +16,7 @@ from hotglue_smoke_test.artifacts import (
     wipe_generate_artifacts,
     wipe_record_artifacts,
 )
+from hotglue_smoke_test.vcr.base import VCRBaseTestRunner
 from hotglue_smoke_test.vcr.sanitize import (
     load_cassette,
     sanitize_cassette_file,
@@ -53,6 +54,8 @@ def _check_sanitize_round_trip(tmp: Path) -> None:
             "Email": "Alias@Example.com",
             "first_name": "Ada",
             "updatedAt": "2026-07-07T15:00:00Z",
+            "quantity": 42,
+            "enabled": True,
             "nested": {
                 "email": "real@example.com",
                 "phone": "+15551234",
@@ -78,48 +81,56 @@ def _check_sanitize_round_trip(tmp: Path) -> None:
     faker = Faker()
     Faker.seed(42)
     cache = {}
-    scrub_keys = {"email", "Email", "phone", "first_name"}
     preserve_keys = {"updatedAt"}
+    token_keys = set(VCRBaseTestRunner.TOKEN_KEYS)
 
     sanitize_cassette_file(
         cassette_path,
         scrub_response=lambda b: scrub_response_json(
-            b, scrub_keys, preserve_keys, faker, cache
+            b, preserve_keys, faker, cache, token_keys
         ),
     )
 
     data = load_cassette(cassette_path)
     scrubbed = json.loads(data["interactions"][0]["response"]["body"]["string"])
-    assert scrubbed["access_token"] == "access_token"
-    assert scrubbed["nested"]["access_token"] == "access_token"
+    assert scrubbed["access_token"] == "sec***"
+    assert scrubbed["nested"]["access_token"] == "nes***"
     assert scrubbed["updatedAt"] == "2026-07-07T15:00:00Z"
     assert scrubbed["email"] != "real@example.com"
     assert "@" in scrubbed["Email"] and scrubbed["Email"] != "Alias@Example.com"
     assert scrubbed["first_name"] != "Ada"
     assert scrubbed["nested"]["email"] == scrubbed["email"]
     assert scrubbed["nested"]["phone"] != "+15551234"
-
-    # same seed + cache empty → stable fake for same input on re-run
-    Faker.seed(42)
-    again = scrub_response_json(
-        json.dumps({"email": "real@example.com", "updatedAt": "keep"}),
-        scrub_keys,
-        preserve_keys,
-        Faker(),
-        {},
+    assert scrubbed["quantity"] != 42 and isinstance(scrubbed["quantity"], int)
+    assert isinstance(scrubbed["enabled"], bool)
+    # hasNextPage-style keys stay real when preserved (tap owns pagination allowlist)
+    Faker.seed(7)
+    page = json.loads(
+        scrub_response_json(
+            json.dumps({"hasNextPage": True, "closed": True}),
+            {"hasNextPage"},
+            Faker(),
+            {},
+            token_keys,
+        )
     )
-    again_data = json.loads(again)
-    assert again_data["email"] == scrubbed["email"]
-    assert again_data["updatedAt"] == "keep"
+    assert page["hasNextPage"] is True
+    assert isinstance(page["closed"], bool)
+
+
+    # same seed + empty cache → stable fake for same payload on re-run
+    Faker.seed(42)
+    again = scrub_response_json(body, preserve_keys, Faker(), {}, token_keys)
+    assert json.loads(again) == scrubbed
 
     # dotted Intacct-style keys use last segment for faker type
     Faker.seed(11)
     dotted = scrub_response_json(
         json.dumps({"BILLTO.FIRSTNAME": "Ada"}),
-        {"BILLTO.FIRSTNAME"},
         set(),
         Faker(),
         {},
+        token_keys,
     )
     dotted_data = json.loads(dotted)
     assert dotted_data["BILLTO.FIRSTNAME"] != "Ada"
@@ -146,7 +157,7 @@ def main() -> None:
 
         (case / "config.json").write_text('{"api_key": "shpca_live_token"}\n')
         validate_record(case, force=True)
-        sanitize_config_credentials(case)
+        sanitize_config_credentials(case, VCRBaseTestRunner.TOKEN_KEYS)
         assert json.loads((case / "config.json").read_text())["api_key"] == "shp***"
 
         _assert_raises_system_exit(lambda: validate_generate(case, False, force=False))
