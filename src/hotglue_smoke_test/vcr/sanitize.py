@@ -242,7 +242,7 @@ def make_faker_replace_fn(faker, cache: dict) -> Callable[[str, Any], Any]:
     return replace
 
 
-def scrub_response_json(
+def scrub_response_body(
     body: str,
     preserve_keys: set[str],
     faker,
@@ -252,8 +252,10 @@ def scrub_response_json(
     """Parse response JSON, redact tokens, default-scrub other leaves, re-serialize."""
     try:
         data = json.loads(body)
-    except json.JSONDecodeError:
-        return body
+    except json.JSONDecodeError as exc:
+        raise NotImplementedError(
+            "VCR response body is not JSON; refusing to leave HTML/XML/plain text unscrubbed"
+        ) from exc
 
     # Redact on real values first; preserve those keys so hard scrub won't rewrite them.
     data = scrub_tokens_in_json(data, token_keys)

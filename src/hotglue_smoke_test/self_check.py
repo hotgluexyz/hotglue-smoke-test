@@ -21,7 +21,7 @@ from hotglue_smoke_test.vcr.sanitize import (
     load_cassette,
     sanitize_cassette_file,
     sanitize_config_credentials,
-    scrub_response_json,
+    scrub_response_body,
     write_cassette,
 )
 
@@ -86,7 +86,7 @@ def _check_sanitize_round_trip(tmp: Path) -> None:
 
     sanitize_cassette_file(
         cassette_path,
-        scrub_response=lambda b: scrub_response_json(
+        scrub_response=lambda b: scrub_response_body(
             b, preserve_keys, faker, cache, token_keys
         ),
     )
@@ -106,7 +106,7 @@ def _check_sanitize_round_trip(tmp: Path) -> None:
     # hasNextPage-style keys stay real when preserved (tap owns pagination allowlist)
     Faker.seed(7)
     page = json.loads(
-        scrub_response_json(
+        scrub_response_body(
             json.dumps({"hasNextPage": True, "closed": True}),
             {"hasNextPage"},
             Faker(),
@@ -120,12 +120,12 @@ def _check_sanitize_round_trip(tmp: Path) -> None:
 
     # same seed + empty cache → stable fake for same payload on re-run
     Faker.seed(42)
-    again = scrub_response_json(body, preserve_keys, Faker(), {}, token_keys)
+    again = scrub_response_body(body, preserve_keys, Faker(), {}, token_keys)
     assert json.loads(again) == scrubbed
 
     # dotted Intacct-style keys use last segment for faker type
     Faker.seed(11)
-    dotted = scrub_response_json(
+    dotted = scrub_response_body(
         json.dumps({"BILLTO.FIRSTNAME": "Ada"}),
         set(),
         Faker(),
@@ -139,7 +139,7 @@ def _check_sanitize_round_trip(tmp: Path) -> None:
     # array-rooted responses must still redact TOKEN_KEYS (not skip / preserve live)
     Faker.seed(13)
     arr = json.loads(
-        scrub_response_json(
+        scrub_response_body(
             json.dumps([{"api_key": "secret-live-key", "name": "Ada"}]),
             set(),
             Faker(),
@@ -149,6 +149,13 @@ def _check_sanitize_round_trip(tmp: Path) -> None:
     )
     assert arr[0]["api_key"] == "sec***"
     assert arr[0]["name"] != "Ada"
+
+    try:
+        scrub_response_body("<html>nope</html>", set(), Faker(), {}, token_keys)
+    except NotImplementedError:
+        pass
+    else:
+        raise AssertionError("expected NotImplementedError for non-JSON body")
 
 
 def main() -> None:
