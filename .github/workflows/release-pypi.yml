@@ -1,14 +1,18 @@
-name: Run tests
+name: Release to PyPI
 
 on:
-  pull_request:
-    branches: [main, master]
+  push:
+    tags:
+      - "*"
 
 jobs:
-  tox-py:
+  release:
     runs-on: ubuntu-latest
-    env:
-      UV_SYSTEM_PYTHON: 1
+    environment:
+      name: pypi
+    permissions:
+      id-token: write
+      contents: read
 
     steps:
       - uses: actions/checkout@v7
@@ -20,8 +24,8 @@ jobs:
           python-version: "3.10"
           enable-cache: true
 
-      - name: Install tox
-        run: uv pip install tox
+      - name: Build
+        run: uv build
 
-      - name: Run tox -e py
-        run: tox -e py
+      - name: Publish
+        run: uv publish

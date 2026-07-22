@@ -22,7 +22,30 @@ tap-foo/
 ## Install
 
 ```bash
-pip install "hotglue-smoke-test @ git+https://github.com/hotgluexyz/hotglue-smoke-test.git@main"
+uv pip install hotglue-smoke-test
+# pin when needed, e.g. uv pip install 'hotglue-smoke-test~=0.1.0'
+```
+
+Dev / unreleased branch:
+
+```bash
+uv pip install "hotglue-smoke-test @ git+https://github.com/hotgluexyz/hotglue-smoke-test.git@<branch>"
+```
+
+## Release (PyPI)
+
+Uses [`uv build` / `uv publish`](https://docs.astral.sh/uv/guides/integration/github/#publishing-to-pypi) with trusted publishing (no `PYPI_API_TOKEN`).
+
+One-time setup:
+1. GitHub → Settings → Environments → create `pypi`.
+2. PyPI → project → Publishing → add a trusted publisher matching this repo/workflow/`pypi` environment.
+
+Then bump `version` in `pyproject.toml`, commit, tag, push the tag:
+
+```bash
+# after merging to main with version bumped
+git tag 0.1.0
+git push origin 0.1.0
 ```
 
 ## Commands
