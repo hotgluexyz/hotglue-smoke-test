@@ -8,24 +8,26 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
-    environment:
-      name: pypi
-    permissions:
-      id-token: write
-      contents: read
 
     steps:
-      - uses: actions/checkout@v7
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          version: "0.11.31"
           python-version: "3.10"
-          enable-cache: true
 
-      - name: Build
-        run: uv build
+      - name: Install build and twine
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build twine
 
-      - name: Publish
-        run: uv publish
+      - name: Build package
+        run: python -m build
+
+      - name: Upload package to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: python -m twine upload dist/*
