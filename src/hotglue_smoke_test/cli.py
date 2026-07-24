@@ -33,7 +33,7 @@ def _print_status(status: str, message: str) -> None:
 
 
 def _resolve_tests_dir(connector_dir: Path) -> Path:
-    tests_dir = connector_dir / "__tests__"
+    tests_dir = connector_dir / "__smoke-tests__"
     record_vcr = tests_dir / "record-vcr.py"
     if not record_vcr.is_file():
         print(
