@@ -23,7 +23,7 @@ tap-foo/
 
 ```bash
 uv pip install hotglue-smoke-test
-# pin when needed, e.g. uv pip install 'hotglue-smoke-test~=0.1.0'
+# pin when needed, e.g. uv pip install 'hotglue-smoke-test~=1.0.0'
 ```
 
 Dev / unreleased branch:
@@ -44,8 +44,8 @@ Then bump `version` in `pyproject.toml`, commit, tag, push the tag:
 
 ```bash
 # after merging to main with version bumped
-git tag 0.1.0
-git push origin 0.1.0
+git tag 1.0.0
+git push origin 1.0.0
 ```
 
 ## Commands
