@@ -1,6 +1,6 @@
 # hotglue-smoke-test
 
-Smoke-test harness for hotglue taps and targets with **colocated** `__tests__/` fixtures in connector repos.
+Smoke-test harness for hotglue taps and targets with **colocated** `__smoke-tests__/` fixtures in connector repos.
 
 Three phases: record HTTP (then scrub) → generate data.singer/state.json → run (replay + compare).
 
@@ -10,9 +10,9 @@ Run from the connector repo root (after installing into that venv). Connector na
 
 ```
 tap-foo/
-  __tests__/
+  __smoke-tests__/
     record-vcr.py
-  __tests__/some_stream_test/
+  __smoke-tests__/some_stream_test/
     config.json
     catalog-selected.json
     fixtures/vcr.yaml
@@ -23,7 +23,7 @@ tap-foo/
 
 ```bash
 uv pip install hotglue-smoke-test
-# pin when needed, e.g. uv pip install 'hotglue-smoke-test~=0.1.0'
+# pin when needed, e.g. uv pip install 'hotglue-smoke-test~=1.0.0'
 ```
 
 Dev / unreleased branch:
@@ -44,8 +44,8 @@ Then bump `version` in `pyproject.toml`, commit, tag, push the tag:
 
 ```bash
 # after merging to main with version bumped
-git tag 0.1.0
-git push origin 0.1.0
+git tag 1.0.0
+git push origin 1.0.0
 ```
 
 ## Commands
@@ -90,7 +90,7 @@ hotglue-smoke-test generate --force orders_test  # refresh data.singer/state.jso
 hotglue-smoke-test run orders_test
 ```
 
-Connector `__tests__/record-vcr.py`:
+Connector `__smoke-tests__/record-vcr.py`:
 
 ```python
 from hotglue_smoke_test.vcr.tap import VCRTapTestRunner
