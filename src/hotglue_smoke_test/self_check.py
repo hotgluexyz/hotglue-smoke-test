@@ -24,6 +24,7 @@ from hotglue_smoke_test.vcr.sanitize import (
     scrub_response_body,
     write_cassette,
 )
+from hotglue_smoke_test.etl.scrub import make_deterministic_replace_fn
 
 
 def _assert_raises_system_exit(fn) -> None:
@@ -34,6 +35,40 @@ def _assert_raises_system_exit(fn) -> None:
         return
     raise AssertionError("expected SystemExit")
 
+
+def _check_etl_deterministic_scrub() -> None:
+    preserve_values = {"PENDING", "USD"}
+
+    def split_composite(value: str):
+        if "--" in value:
+            left, right = value.rsplit("--", 1)
+            if right in preserve_values:
+                return left, right
+        return None
+
+    a = {}
+    b = {}
+    ra = make_deterministic_replace_fn(
+        preserve_values=preserve_values, cache=a, split_composite=split_composite
+    )
+    rb = make_deterministic_replace_fn(
+        preserve_values=preserve_values, cache=b, split_composite=split_composite
+    )
+    assert ra("id", "entity_abc123") == rb("externalId", "entity_abc123")
+    assert ra("status", "PENDING") == "PENDING"
+    assert ra("bank_account_id", "entity_abc123--USD") == (
+        f"{ra('id', 'entity_abc123')}--USD"
+    )
+    # same process cache reuse
+    assert a[(str, "entity_abc123")] == ra("InputId", "entity_abc123")
+    # without split_composite, whole string is one scrub unit (suffix not preserved)
+    plain = make_deterministic_replace_fn(preserve_values=preserve_values, cache={})
+    assert plain("bank_account_id", "entity_abc123--USD") != "entity_abc123--USD"
+    assert not str(plain("bank_account_id", "entity_abc123--USD")).endswith("--USD")
+    # CSV stores datetimes as strings — keep ISO values (parquet Timestamps already kept)
+    iso = "2026-07-03T13:00:00"
+    assert plain("settled_at", iso) == iso
+    assert plain("due_date", "2026-07-15") == "2026-07-15"
 
 def _swallow_success_system_exit(fn) -> None:
     """Same contract as VCRBaseTestRunner.run_test around launch()."""
@@ -201,6 +236,7 @@ def main() -> None:
         assert not (case / "test_runtime").exists()
 
         _check_sanitize_round_trip(Path(tmp) / "sanitize_check")
+        _check_etl_deterministic_scrub()
 
         def _exit(code):
             raise SystemExit(code)

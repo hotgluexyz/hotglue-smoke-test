@@ -18,7 +18,8 @@ from hotglue_smoke_test.artifacts import (
     wipe_generate_artifacts,
     wipe_record_artifacts,
 )
-from hotglue_smoke_test.drivers import tap_driver, target_driver
+from hotglue_smoke_test.drivers import etl_driver, tap_driver, target_driver
+from hotglue_smoke_test.etl import ops as etl_ops
 
 
 def _print_section(title: str) -> None:
@@ -32,17 +33,26 @@ def _print_status(status: str, message: str) -> None:
     print(f"[{timestamp}] {status}: {message}")
 
 
+def _is_etl(tests_dir: Path) -> bool:
+    return (tests_dir / "record-etl.py").is_file()
+
+
+def _is_target_repo(connector_dir: Path) -> bool:
+    """Detect target repos from directory name (`target-*`)."""
+    return connector_dir.name.startswith("target-")
+
+
 def _resolve_tests_dir(connector_dir: Path) -> Path:
     tests_dir = connector_dir / "__smoke-tests__"
     record_vcr = tests_dir / "record-vcr.py"
-    if not record_vcr.is_file():
+    record_etl = tests_dir / "record-etl.py"
+    if not record_vcr.is_file() and not record_etl.is_file():
         print(
-            f"Error: colocated tests require {record_vcr}",
+            f"Error: colocated tests require {record_vcr} or {record_etl}",
             file=sys.stderr,
         )
         sys.exit(1)
     return tests_dir
-
 
 def _discover_cases(test_dir: Path, case_name: str) -> list[str]:
     if case_name == "*":
@@ -83,11 +93,20 @@ def _run_record_vcr(
     subprocess.run([sys.executable, str(record_vcr), testcase], env=env, check=True)
 
 
-def _run_comparison(smoke_test_dir: Path, case_name: str, is_target: bool) -> None:
+def _run_comparison(
+    smoke_test_dir: Path,
+    case_name: str,
+    is_target: bool,
+    *,
+    is_etl: bool = False,
+) -> None:
     os.environ["SMOKE_TEST_DIR"] = str(smoke_test_dir)
     os.environ["CASE_NAME"] = case_name
 
-    driver = target_driver if is_target else tap_driver
+    if is_etl:
+        driver = etl_driver
+    else:
+        driver = target_driver if is_target else tap_driver
     exit_code = pytest.main(["-s", driver.__file__])
     if exit_code != 0:
         raise subprocess.CalledProcessError(exit_code, "pytest")
@@ -98,7 +117,12 @@ def _prepare_case(
     case_dir: Path,
     is_target: bool,
     force: bool,
+    *,
+    is_etl: bool = False,
 ) -> None:
+    if is_etl:
+        # ETL validate/wipe lives in etl.ops (day fixtures, not VCR cassette).
+        return
     if mode == "record":
         validate_record(case_dir, force)
         if force:
@@ -109,6 +133,48 @@ def _prepare_case(
             wipe_generate_artifacts(case_dir)
     elif mode == "run":
         validate_run(case_dir, is_target)
+
+
+def _execute_etl_case(
+    mode: str,
+    connector_name: str,
+    testcase: str,
+    connector_dir: Path,
+    smoke_test_dir: Path,
+    force: bool,
+    no_scrub: bool,
+) -> None:
+    label = {
+        "record": "Recording ETL fixtures",
+        "generate": "Generating ETL expected_output",
+        "run": "Running ETL comparison",
+    }[mode]
+    _print_section(f"{label}: {connector_name} / {testcase}")
+    _print_status("INFO", f"Starting at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+    if mode == "record":
+        etl_ops.record_case(
+            script_root=connector_dir,
+            tests_dir=smoke_test_dir,
+            case_name=testcase,
+            force=force,
+            no_scrub=no_scrub,
+        )
+    elif mode == "generate":
+        etl_ops.generate_case(
+            script_root=connector_dir,
+            tests_dir=smoke_test_dir,
+            case_name=testcase,
+            force=force,
+        )
+    elif mode == "run":
+        etl_ops.run_case(
+            script_root=connector_dir,
+            tests_dir=smoke_test_dir,
+            case_name=testcase,
+        )
+        _print_status("INFO", f"Running comparison for case {testcase}")
+        _run_comparison(smoke_test_dir, testcase, is_target=False, is_etl=True)
 
 
 def _execute_case(
@@ -122,7 +188,20 @@ def _execute_case(
     no_scrub: bool = False,
 ) -> None:
     case_dir = smoke_test_dir / testcase
-    _prepare_case(mode, case_dir, is_target, force)
+    is_etl = _is_etl(smoke_test_dir)
+    _prepare_case(mode, case_dir, is_target, force, is_etl=is_etl)
+
+    if is_etl:
+        _execute_etl_case(
+            mode,
+            connector_name,
+            testcase,
+            connector_dir,
+            smoke_test_dir,
+            force,
+            no_scrub,
+        )
+        return
 
     label = {
         "record": "Recording vcr",
@@ -152,12 +231,20 @@ def _run_command(args: argparse.Namespace) -> int:
     connector_dir = Path(args.connector_directory).resolve()
     smoke_test_dir = _resolve_tests_dir(connector_dir)
     connector_name = connector_dir.name.removeprefix("tap-").removeprefix("target-")
+    is_target = _is_target_repo(connector_dir)
+    is_etl = _is_etl(smoke_test_dir)
 
     _print_section("Test Configuration")
     _print_status("INFO", f"Mode: {mode}")
     _print_status("INFO", f"Connector Name: {connector_name}")
     _print_status("INFO", f"Case Name: {args.case_name}")
-    _print_status("INFO", f"Target Mode: {args.target}")
+    if is_etl:
+        kind = "etl"
+    elif is_target:
+        kind = "target"
+    else:
+        kind = "tap"
+    _print_status("INFO", f"Kind: {kind}")
     _print_status("INFO", f"Connector Directory: {connector_dir}")
     _print_status("INFO", f"Test Directory: {smoke_test_dir}")
 
@@ -178,7 +265,7 @@ def _run_command(args: argparse.Namespace) -> int:
                 testcase,
                 connector_dir,
                 smoke_test_dir,
-                args.target,
+                is_target,
                 args.force,
                 no_scrub=args.no_scrub,
             )
@@ -216,7 +303,6 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         default=".",
         help="Path to connector repo root (default: current directory)",
     )
-    parser.add_argument("--target", action="store_true", help="Run as target")
 
 
 def build_parser() -> argparse.ArgumentParser:
