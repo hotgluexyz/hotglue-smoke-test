@@ -14,7 +14,6 @@ from faker import Faker
 
 from hotglue_smoke_test.vcr.sanitize import make_faker_replace_fn, redact_credential
 
-_DAY_DIR_RE = re.compile(r"^\d{8}(T\d{6})?$")
 # CSV fixtures store datetimes as strings; keep ISO-looking values unscrubbed.
 _ISO_TEMPORAL_RE = re.compile(
     r"^\d{4}-\d{2}-\d{2}"
@@ -32,6 +31,7 @@ _SKIP_SCRUB_NAMES = frozenset(
 )
 
 LooksLikeIdKey = Callable[[str], bool]
+# Return (left, right) to scrub each side via replace (PRESERVE_VALUES applies); else None.
 SplitComposite = Callable[[str], tuple[str, str] | None]
 
 
@@ -84,12 +84,12 @@ def make_deterministic_replace_fn(
             ):
                 return value
 
-        # Optional connector hook: scrub prefix, keep suffix (contract: "prefix--suffix").
+        # Optional connector split: scrub each side; PRESERVE_VALUES keeps enums.
         if isinstance(value, str) and split_composite is not None:
             parts = split_composite(value)
             if parts is not None:
                 left, right = parts
-                return f"{replace(key, left)}--{right}"
+                return f"{replace(key, left)}--{replace(key, right)}"
 
         ck = _cache_key(value)
         if ck is not None and ck in cache:
@@ -326,9 +326,3 @@ def scrub_tree(
             looks_like_id_key=looks_like_id_key,
         )
 
-
-def list_day_dirs(case_dir: Path) -> list[Path]:
-    days = [
-        p for p in case_dir.iterdir() if p.is_dir() and _DAY_DIR_RE.match(p.name)
-    ]
-    return sorted(days, key=lambda p: p.name)

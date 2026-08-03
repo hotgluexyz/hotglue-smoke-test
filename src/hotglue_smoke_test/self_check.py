@@ -10,9 +10,13 @@ from faker import Faker
 
 from hotglue_smoke_test.artifacts import (
     output_path,
+    validate_etl_generate,
+    validate_etl_run,
     validate_generate,
     validate_record,
     validate_run,
+    wipe_etl_generate_artifacts,
+    wipe_etl_record_artifacts,
     wipe_generate_artifacts,
     wipe_record_artifacts,
 )
@@ -42,8 +46,7 @@ def _check_etl_deterministic_scrub() -> None:
     def split_composite(value: str):
         if "--" in value:
             left, right = value.rsplit("--", 1)
-            if right in preserve_values:
-                return left, right
+            return left, right
         return None
 
     a = {}
@@ -56,12 +59,14 @@ def _check_etl_deterministic_scrub() -> None:
     )
     assert ra("id", "entity_abc123") == rb("externalId", "entity_abc123")
     assert ra("status", "PENDING") == "PENDING"
+    # With split: each side through replace; PRESERVE_VALUES keeps USD
     assert ra("bank_account_id", "entity_abc123--USD") == (
         f"{ra('id', 'entity_abc123')}--USD"
     )
+    assert ra("x", "USD--secret_id") == f"USD--{ra('id', 'secret_id')}"
     # same process cache reuse
     assert a[(str, "entity_abc123")] == ra("InputId", "entity_abc123")
-    # without split_composite, whole string is one scrub unit (suffix not preserved)
+    # without split hook, whole string is one scrub unit
     plain = make_deterministic_replace_fn(preserve_values=preserve_values, cache={})
     assert plain("bank_account_id", "entity_abc123--USD") != "entity_abc123--USD"
     assert not str(plain("bank_account_id", "entity_abc123--USD")).endswith("--USD")
@@ -234,6 +239,26 @@ def main() -> None:
         assert (case / "fixtures" / "vcr.yaml").is_file()
         assert not (case / "expected_output").exists()
         assert not (case / "test_runtime").exists()
+
+        etl_case = Path(tmp) / "bank_transactions_test"
+        etl_case.mkdir()
+        (etl_case / "test-config.json").write_text('{"flow": "x"}\n')
+        day1 = etl_case / "20260701T120000"
+        day1.mkdir()
+        (day1 / "fixtures").mkdir()
+        (day1 / "expected_output" / "etl-output").mkdir(parents=True)
+        (day1 / "test_runtime").mkdir()
+        _assert_raises_system_exit(lambda: validate_etl_generate(etl_case, force=False))
+        validate_etl_run(etl_case)
+        wipe_etl_generate_artifacts(etl_case)
+        assert (day1 / "fixtures").is_dir()
+        assert not (day1 / "expected_output").exists()
+        assert not (day1 / "test_runtime").exists()
+        _assert_raises_system_exit(lambda: validate_etl_run(etl_case))
+        wipe_etl_record_artifacts(etl_case)
+        assert not day1.exists()
+        assert (etl_case / "test-config.json").is_file()
+        _assert_raises_system_exit(lambda: validate_etl_generate(etl_case, force=False))
 
         _check_sanitize_round_trip(Path(tmp) / "sanitize_check")
         _check_etl_deterministic_scrub()

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "hotglue-smoke-test"
 version = "1.1.0"
-description = "Smoke-test harness for hotglue taps and targets: VCR runners, output comparison, and CLI."
+description = "Smoke-test harness for hotglue taps, targets, and ETLs: VCR/ETL runners, output comparison, and CLI."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }

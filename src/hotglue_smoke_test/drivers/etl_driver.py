@@ -1,4 +1,4 @@
-"""Compare ETL smoke expected_output/ vs test_runtime/ (per day)."""
+"""Compare ETL smoke expected_output/ vs test_runtime/ (per UTC datetime folder)."""
 
 from __future__ import annotations
 
@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pandas as pd
 
+from hotglue_smoke_test.artifacts import list_etl_datetime_dirs
 from hotglue_smoke_test.compare.singer_output_comparator import SingerOutputComparator
 from hotglue_smoke_test.compare.test_configurer import TestConfigurer
-from hotglue_smoke_test.etl.scrub import list_day_dirs
 
 
 def _compare_snapshot_trees(expected: Path, actual: Path, label: str) -> None:
@@ -53,15 +53,15 @@ class TestEtl(unittest.TestCase):
         case_dir = smoke_dir / case_name
         test_config = TestConfigurer.get_test_config(str(case_dir))
 
-        days = list_day_dirs(case_dir)
-        assert days, f"no day dirs under {case_dir}"
+        jobs = list_etl_datetime_dirs(case_dir)
+        assert jobs, f"no UTC datetime dirs under {case_dir}"
 
-        for day_dir in days:
-            day = day_dir.name
-            expected_etl = day_dir / "expected_output" / "etl-output"
-            actual_etl = day_dir / "test_runtime" / "etl-output"
+        for job_dir in jobs:
+            stamp = job_dir.name
+            expected_etl = job_dir / "expected_output" / "etl-output"
+            actual_etl = job_dir / "test_runtime" / "etl-output"
             print(
-                f"[ETL COMPARE] day={day} expected={expected_etl} actual={actual_etl}"
+                f"[ETL COMPARE] datetime={stamp} expected={expected_etl} actual={actual_etl}"
             )
 
             if (expected_etl / "data.singer").is_file():
@@ -70,8 +70,8 @@ class TestEtl(unittest.TestCase):
                 ).compare()
 
             _compare_snapshot_trees(
-                day_dir / "expected_output" / "snapshots",
-                day_dir / "test_runtime" / "snapshots",
-                label=f"{case_name}/{day}",
+                job_dir / "expected_output" / "snapshots",
+                job_dir / "test_runtime" / "snapshots",
+                label=f"{case_name}/{stamp}",
             )
-            print(f"PASSED!!: {case_name}/{day}")
+            print(f"PASSED!!: {case_name}/{stamp}")

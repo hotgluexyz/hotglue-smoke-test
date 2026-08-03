@@ -12,14 +12,17 @@ from pathlib import Path
 import pytest
 
 from hotglue_smoke_test.artifacts import (
+    validate_etl_generate,
+    validate_etl_run,
     validate_generate,
     validate_record,
     validate_run,
+    wipe_etl_generate_artifacts,
+    wipe_etl_record_artifacts,
     wipe_generate_artifacts,
     wipe_record_artifacts,
 )
 from hotglue_smoke_test.drivers import etl_driver, tap_driver, target_driver
-from hotglue_smoke_test.etl import ops as etl_ops
 
 
 def _print_section(title: str) -> None:
@@ -71,26 +74,33 @@ def _discover_cases(test_dir: Path, case_name: str) -> list[str]:
     return [case_name]
 
 
-def _run_record_vcr(
+def _run_colocated_script(
+    script: Path,
     connector_dir: Path,
-    tests_dir: Path,
     testcase: str,
     mode: str,
+    *,
+    force: bool = False,
     no_scrub: bool = False,
 ) -> None:
-    record_vcr = tests_dir / "record-vcr.py"
+    """Shell out to record-vcr.py / record-etl.py with SMOKE_TEST_* env."""
     env = os.environ.copy()
     env["PYTHONPATH"] = str(connector_dir)
     env["SMOKE_TEST_MODE"] = mode
+    if force:
+        env["SMOKE_TEST_FORCE"] = "1"
+    else:
+        env.pop("SMOKE_TEST_FORCE", None)
     if no_scrub:
         env["SMOKE_TEST_NO_SCRUB"] = "1"
     else:
         env.pop("SMOKE_TEST_NO_SCRUB", None)
+    force_flag = env.get("SMOKE_TEST_FORCE", "")
     print(
-        f"command [SMOKE_TEST_MODE={mode} PYTHONPATH={env['PYTHONPATH']} "
-        f"python {record_vcr} {testcase}]"
+        f"command [SMOKE_TEST_MODE={mode} SMOKE_TEST_FORCE={force_flag} "
+        f"PYTHONPATH={env['PYTHONPATH']} python {script} {testcase}]"
     )
-    subprocess.run([sys.executable, str(record_vcr), testcase], env=env, check=True)
+    subprocess.run([sys.executable, str(script), testcase], env=env, check=True)
 
 
 def _run_comparison(
@@ -121,7 +131,16 @@ def _prepare_case(
     is_etl: bool = False,
 ) -> None:
     if is_etl:
-        # ETL validate/wipe lives in etl.ops (day fixtures, not VCR cassette).
+        # ETL record is append-only (UTC datetime dirs); --force wipes those dirs.
+        if mode == "record":
+            if force:
+                wipe_etl_record_artifacts(case_dir)
+        elif mode == "generate":
+            validate_etl_generate(case_dir, force)
+            if force:
+                wipe_etl_generate_artifacts(case_dir)
+        elif mode == "run":
+            validate_etl_run(case_dir)
         return
     if mode == "record":
         validate_record(case_dir, force)
@@ -135,48 +154,6 @@ def _prepare_case(
         validate_run(case_dir, is_target)
 
 
-def _execute_etl_case(
-    mode: str,
-    connector_name: str,
-    testcase: str,
-    connector_dir: Path,
-    smoke_test_dir: Path,
-    force: bool,
-    no_scrub: bool,
-) -> None:
-    label = {
-        "record": "Recording ETL fixtures",
-        "generate": "Generating ETL expected_output",
-        "run": "Running ETL comparison",
-    }[mode]
-    _print_section(f"{label}: {connector_name} / {testcase}")
-    _print_status("INFO", f"Starting at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-    if mode == "record":
-        etl_ops.record_case(
-            script_root=connector_dir,
-            tests_dir=smoke_test_dir,
-            case_name=testcase,
-            force=force,
-            no_scrub=no_scrub,
-        )
-    elif mode == "generate":
-        etl_ops.generate_case(
-            script_root=connector_dir,
-            tests_dir=smoke_test_dir,
-            case_name=testcase,
-            force=force,
-        )
-    elif mode == "run":
-        etl_ops.run_case(
-            script_root=connector_dir,
-            tests_dir=smoke_test_dir,
-            case_name=testcase,
-        )
-        _print_status("INFO", f"Running comparison for case {testcase}")
-        _run_comparison(smoke_test_dir, testcase, is_target=False, is_etl=True)
-
-
 def _execute_case(
     mode: str,
     connector_name: str,
@@ -184,44 +161,41 @@ def _execute_case(
     connector_dir: Path,
     smoke_test_dir: Path,
     is_target: bool,
+    is_etl: bool,
     force: bool,
     no_scrub: bool = False,
 ) -> None:
     case_dir = smoke_test_dir / testcase
-    is_etl = _is_etl(smoke_test_dir)
     _prepare_case(mode, case_dir, is_target, force, is_etl=is_etl)
 
     if is_etl:
-        _execute_etl_case(
-            mode,
-            connector_name,
-            testcase,
-            connector_dir,
-            smoke_test_dir,
-            force,
-            no_scrub,
-        )
-        return
-
-    label = {
-        "record": "Recording vcr",
-        "generate": "Generating data.singer/state.json",
-        "run": "Running comparison",
-    }[mode]
+        label = {
+            "record": "Recording ETL fixtures",
+            "generate": "Generating ETL expected_output",
+            "run": "Running ETL comparison",
+        }[mode]
+    else:
+        label = {
+            "record": "Recording vcr",
+            "generate": "Generating data.singer/state.json",
+            "run": "Running comparison",
+        }[mode]
     _print_section(f"{label}: {connector_name} / {testcase}")
     _print_status("INFO", f"Starting at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-    _run_record_vcr(
+    script = smoke_test_dir / ("record-etl.py" if is_etl else "record-vcr.py")
+    _run_colocated_script(
+        script,
         connector_dir,
-        smoke_test_dir,
         testcase,
         mode,
+        force=force if is_etl else False,
         no_scrub=no_scrub,
     )
 
     if mode == "run":
         _print_status("INFO", f"Running comparison for case {testcase}")
-        _run_comparison(smoke_test_dir, testcase, is_target)
+        _run_comparison(smoke_test_dir, testcase, is_target, is_etl=is_etl)
 
 
 def _run_command(args: argparse.Namespace) -> int:
@@ -266,6 +240,7 @@ def _run_command(args: argparse.Namespace) -> int:
                 connector_dir,
                 smoke_test_dir,
                 is_target,
+                is_etl,
                 args.force,
                 no_scrub=args.no_scrub,
             )

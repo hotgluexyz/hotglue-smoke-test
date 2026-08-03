@@ -21,16 +21,16 @@ tap-foo/
 ```
 ### ETL
 
-Mimics successive hotglue jobs: each `record` appends a new datetime folder; `generate`/`run` chain snapshots from the previous day’s post-ETL output.
+Mimics successive hotglue jobs: each `record` appends a new UTC datetime folder (`YYYYMMDDTHHMMSS`); `generate`/`run` chain snapshots from the previous job’s post-ETL output.
 
-**`fixtures/` is the input** (scrubbed tap `sync-output`, seed `snapshots`, `mapping.json`, `catalog.json`). It is not a VCR cassette.
+**`fixtures/` is the input** (scrubbed tap `sync-output`, seed `snapshots`, `mapping.json`, `catalog.json`).
 
 ```
 script-dir/                  # folder with etl.py
   __smoke-tests__/
     record-etl.py            # FLOW, PRESERVE_COLUMNS/VALUES/KEYS
     <case>_test/
-      20260528T181228/       # job 1
+      20260528T120000/       # job 1
         fixtures/            # INPUT (committed)
           sync-output/
           snapshots/         # seed only on first day
@@ -82,34 +82,31 @@ git push origin 1.0.0
 # 1.1 TAP - Record VCR cassette (live API; discards Singer output), then scrub secrets/PII
 # 1.2 ETL - Append YYYYMMDDTHHMMSS/fixtures/ (input: sync-output + seed snapshots), scrub
 hotglue-smoke-test record orders_test
-hotglue-smoke-test record bank_transactions_test
 
 # 2.1 TAP - Replay cassette → write expected_output/
-# 2.2 ETL - Per day: etl.py → day/expected_output/; skip days that already have it unless --force
+# 2.2 ETL - Per UTC datetime: etl.py → datetime/expected_output/; skip folders that already have it unless --force
 hotglue-smoke-test generate orders_test
-hotglue-smoke-test generate bank_transactions_test
 
 # 3.1 TAP - Replay cassette → test_runtime/ → compare (CI uses bare `run` = all cases)
-# 3.2 ETL - Per day: etl.py → day/test_runtime/ → compare to day/expected_output/
+# 3.2 ETL - Per UTC datetime: etl.py → datetime/test_runtime/ → compare to datetime/expected_output/
 hotglue-smoke-test run
 hotglue-smoke-test run orders_test
-hotglue-smoke-test run bank_transactions_test
 ```
 
 **Tap:** `record` scrubs by default after the live HTTP capture (cassette response bodies + connector `record-vcr.py` rules). Use `--no-scrub` only for local debug; do not commit unsanitized cassettes.
 
-**ETL:** each `record` creates `<case>/<YYYYMMDDTHHMMSS>/fixtures/` (**input**). First day seeds `fixtures/snapshots/`; later days get snapshots from the previous day’s `expected_output/snapshots` (or runtime) at `generate`/`run`. `generate` fills only days missing `expected_output/` unless `--force`. Fakes are hash-seeded. `PRESERVE_*` keep enum/filter literals real.
+**ETL:** each `record` creates `<case>/<YYYYMMDDTHHMMSS>/fixtures/` (**input**, folder name is **UTC**). First run seeds `fixtures/snapshots/`; later runs get snapshots from the previous job's `expected_output/snapshots` (or runtime) at `generate`/`run`. `generate` fills only datetime folders missing `expected_output/` unless `--force`. Fakes are hash-seeded. `PRESERVE_*` keep enum/filter literals real.
 
-Auto-detect: `record-etl.py` → ETL; else repo name `target-*` → target, `tap-*` → tap. Add `--force` on tap `record`/`generate`, or ETL `generate`, to overwrite existing artifacts. Override the repo root with `--connector-directory` only when not running from cwd.
+Auto-detect: `record-etl.py` → ETL; else repo name `target-*` → target, `tap-*` → tap. Folder validate/wipe lives in `artifacts.py` (CLI `_prepare_case`) for both taps and ETLs — same lifecycle as taps. Add `--force` on `record`/`generate` to overwrite. Override the repo root with `--connector-directory` only when not running from cwd.
 
 ### `--force` semantics
 
 | Command | Without `--force` | With `--force` |
 |---------|-------------------|----------------|
 | `record` (tap) | Fails if `fixtures/vcr.yaml` exists | Wipes `fixtures/`, `expected_output/`, `test_runtime/`, then live-records + scrub |
-| `record` (ETL) | Always appends a new datetime day with `fixtures/` | No-op (still appends; does not wipe prior days) |
+| `record` (ETL) | Always appends a new UTC datetime folder with `fixtures/` | Wipes all UTC datetime dirs (keeps `test-config.json`), then appends a fresh one |
 | `generate` (tap) | Fails if data.singer/state.json output exists | Wipes `expected_output/` and `test_runtime/`, then regenerates from cassette |
-| `generate` (ETL) | Generates only days missing `expected_output/`; errors if all exist | Regenerates every day’s `expected_output/` + `test_runtime/` |
+| `generate` (ETL) | Generates only datetime folders missing `expected_output/`; errors if all exist | Wipes each datetime's `expected_output/` + `test_runtime/`, then regenerates all |
 
 `run` never mutates committed artifacts (`fixtures/` / `expected_output/`).
 
@@ -133,15 +130,15 @@ hotglue-smoke-test run orders_test
 **ETL:**
 
 ```bash
-hotglue-smoke-test record bank_transactions_test              # append day/fixtures/ (input)
-hotglue-smoke-test generate bank_transactions_test            # → day/expected_output/
-hotglue-smoke-test run bank_transactions_test                 # → day/test_runtime/ → diff
+hotglue-smoke-test record bank_transactions_test              # append datetime/fixtures/ (input)
+hotglue-smoke-test generate bank_transactions_test            # → datetime/expected_output/
+hotglue-smoke-test run bank_transactions_test                 # → datetime/test_runtime/ → diff
 
-hotglue-smoke-test record bank_transactions_test              # append day 2 fixtures
-hotglue-smoke-test generate bank_transactions_test            # only fills day 2 expected
+hotglue-smoke-test record bank_transactions_test              # append another fixtures
+hotglue-smoke-test generate bank_transactions_test            # only fills new expected_output/
 hotglue-smoke-test run bank_transactions_test
 
-hotglue-smoke-test generate --force bank_transactions_test    # refresh all days after etl.py change
+hotglue-smoke-test generate --force bank_transactions_test    # refresh all datetime after etl.py change
 hotglue-smoke-test run bank_transactions_test
 ```
 
@@ -153,9 +150,13 @@ from hotglue_smoke_test.vcr.tap import VCRTapTestRunner
 
 Override `sanitize_cassette()` for connector-specific PII rules. Default base scrub only redacts OAuth token keys in response JSON.
 
-ETL `__smoke-tests__/record-etl.py` subclasses `ETLSmokeRunner` and exports `Runner`
-(see airwallex). Implement `looks_like_id_key`; override `split_composite_value` /
-`after_etl` when the script needs them. One Runner serves many `*_test` case folders;
-per-case `flow` / `job_type` / `tenant` go in `<case>/test-config.json`.
+ETL `__smoke-tests__/record-etl.py` subclasses `ETLSmokeRunner` (mirror of
+`VCRTapTestRunner`): override `looks_like_id_key` when ids appear as JSON dict keys;
+override `split_composite_value` for ``left--right`` values (each side scrubbed;
+`PRESERVE_VALUES` keeps enums); override `after_etl` when needed; end with
+`YourClass.main()` under `if __name__ == "__main__"`.
+One Runner serves many `*_test` case folders; per-case `flow` / `job_type` / `tenant`
+go in `<case>/test-config.json`. CLI shells out to `record-etl.py` with `SMOKE_TEST_MODE`
+the same way it shells out to `record-vcr.py`.
 
 Self-check: `python -m hotglue_smoke_test.self_check`
