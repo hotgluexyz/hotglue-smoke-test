@@ -151,7 +151,7 @@ from hotglue_smoke_test.vcr.tap import VCRTapTestRunner
 Override `sanitize_cassette()` for connector-specific PII rules. Default base scrub only redacts OAuth token keys in response JSON.
 
 ETL `__smoke-tests__/record-etl.py` subclasses `ETLSmokeRunner` (mirror of
-`VCRTapTestRunner`): override `looks_like_id_key` when ids appear as JSON dict keys;
+`VCRTapTestRunner`): override `should_scrub_key` when JSON dict keys must be scrubbed;
 override `split_composite_value` for ``left--right`` values (each side scrubbed;
 `PRESERVE_VALUES` keeps enums); override `after_etl` when needed; end with
 `YourClass.main()` under `if __name__ == "__main__"`.

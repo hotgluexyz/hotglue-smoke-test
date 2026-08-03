@@ -59,12 +59,12 @@ class ETLSmokeRunner(ABC):
             return (base / rel).resolve() if not Path(rel).is_absolute() else Path(rel)
         return base.resolve()
 
-    def looks_like_id_key(self, key: str) -> bool:
-        """Return True if a JSON *dict key* should be scrubbed as an entity id.
+    def should_scrub_key(self, key: str) -> bool:
+        """Return True if a JSON *dict key* should be scrubbed (not only values).
 
-        Schema labels must return False.
+        Schema labels must return False. Default: scrub values only.
         """
-        return False  # only scrub values, not dict keys
+        return False
 
     def split_composite_value(self, value: str) -> tuple[str, str] | None:
         """Optionally split a composite so each side is scrubbed independently.
@@ -144,7 +144,7 @@ class ETLSmokeRunner(ABC):
             "preserve_values": preserve_values,
             "preserve_keys": preserve_keys,
             "token_keys": token_keys,
-            "looks_like_id_key": self.looks_like_id_key,
+            "should_scrub_key": self.should_scrub_key,
             "split_composite": self.split_composite_value,
         }
 

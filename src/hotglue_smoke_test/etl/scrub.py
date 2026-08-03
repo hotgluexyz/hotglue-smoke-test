@@ -30,7 +30,7 @@ _SKIP_SCRUB_NAMES = frozenset(
     }
 )
 
-LooksLikeIdKey = Callable[[str], bool]
+ShouldScrubKey = Callable[[str], bool]
 # Return (left, right) to scrub each side via replace (PRESERVE_VALUES applies); else None.
 SplitComposite = Callable[[str], tuple[str, str] | None]
 
@@ -112,10 +112,10 @@ def scrub_json(
     replace_fn: Callable[[str, Any], Any],
     preserve_keys: set[str],
     token_keys: set[str],
-    looks_like_id_key: LooksLikeIdKey,
+    should_scrub_key: ShouldScrubKey,
     scrub_dict_keys: bool = True,
 ) -> Any:
-    """Scrub JSON leaves (and optionally id-like dict keys via looks_like_id_key)."""
+    """Scrub JSON leaves (and optionally dict keys via should_scrub_key)."""
     if isinstance(obj, dict):
         out: dict[Any, Any] = {}
         for key, value in obj.items():
@@ -126,7 +126,7 @@ def scrub_json(
                 and isinstance(key, str)
                 and key not in preserve_keys
                 and key not in token_keys
-                and looks_like_id_key(key)
+                and should_scrub_key(key)
             ):
                 new_key = replace_fn(key_str, key)
 
@@ -140,7 +140,7 @@ def scrub_json(
                     replace_fn=replace_fn,
                     preserve_keys=preserve_keys,
                     token_keys=token_keys,
-                    looks_like_id_key=looks_like_id_key,
+                    should_scrub_key=should_scrub_key,
                     scrub_dict_keys=scrub_dict_keys,
                 )
         return out
@@ -151,7 +151,7 @@ def scrub_json(
                 replace_fn=replace_fn,
                 preserve_keys=preserve_keys,
                 token_keys=token_keys,
-                looks_like_id_key=looks_like_id_key,
+                should_scrub_key=should_scrub_key,
                 scrub_dict_keys=scrub_dict_keys,
             )
             for item in obj
@@ -180,7 +180,7 @@ def scrub_series(
     preserve_values: set[Any],
     preserve_keys: set[str],
     token_keys: set[str],
-    looks_like_id_key: LooksLikeIdKey,
+    should_scrub_key: ShouldScrubKey,
 ) -> pd.Series:
     if column in preserve_columns:
         return series
@@ -197,7 +197,7 @@ def scrub_series(
                 replace_fn=replace_fn,
                 preserve_keys=preserve_keys,
                 token_keys=token_keys,
-                looks_like_id_key=looks_like_id_key,
+                should_scrub_key=should_scrub_key,
                 # Nested payload keys are schema — scrub values only.
                 scrub_dict_keys=False,
             )
@@ -215,7 +215,7 @@ def scrub_dataframe(
     preserve_values: set[Any],
     preserve_keys: set[str],
     token_keys: set[str],
-    looks_like_id_key: LooksLikeIdKey,
+    should_scrub_key: ShouldScrubKey,
     hash_pk_only: bool = False,
 ) -> pd.DataFrame:
     out = df.copy()
@@ -230,7 +230,7 @@ def scrub_dataframe(
             preserve_values=preserve_values,
             preserve_keys=preserve_keys,
             token_keys=token_keys,
-            looks_like_id_key=looks_like_id_key,
+            should_scrub_key=should_scrub_key,
         )
     return out
 
@@ -243,7 +243,7 @@ def scrub_file(
     preserve_values: set[Any],
     preserve_keys: set[str],
     token_keys: set[str],
-    looks_like_id_key: LooksLikeIdKey,
+    should_scrub_key: ShouldScrubKey,
 ) -> None:
     suffix = path.suffix.lower()
     hash_pk_only = _HASH_SUFFIX in path.name
@@ -257,7 +257,7 @@ def scrub_file(
             preserve_values=preserve_values,
             preserve_keys=preserve_keys,
             token_keys=token_keys,
-            looks_like_id_key=looks_like_id_key,
+            should_scrub_key=should_scrub_key,
             hash_pk_only=hash_pk_only,
         )
         scrubbed.to_parquet(path, index=False)
@@ -272,7 +272,7 @@ def scrub_file(
             preserve_values=preserve_values,
             preserve_keys=preserve_keys,
             token_keys=token_keys,
-            looks_like_id_key=looks_like_id_key,
+            should_scrub_key=should_scrub_key,
             hash_pk_only=hash_pk_only,
         )
         scrubbed.to_csv(path, index=False)
@@ -285,7 +285,7 @@ def scrub_file(
             replace_fn=replace_fn,
             preserve_keys=preserve_keys,
             token_keys=token_keys,
-            looks_like_id_key=looks_like_id_key,
+            should_scrub_key=should_scrub_key,
         )
         path.write_text(json.dumps(scrubbed, indent=4) + "\n")
         return
@@ -298,7 +298,7 @@ def scrub_tree(
     preserve_values: set[Any],
     preserve_keys: set[str],
     token_keys: set[str],
-    looks_like_id_key: LooksLikeIdKey,
+    should_scrub_key: ShouldScrubKey,
     split_composite: SplitComposite | None = None,
     cache: dict | None = None,
 ) -> None:
@@ -323,6 +323,6 @@ def scrub_tree(
             preserve_values=preserve_values,
             preserve_keys=preserve_keys,
             token_keys=token_keys,
-            looks_like_id_key=looks_like_id_key,
+            should_scrub_key=should_scrub_key,
         )
 
