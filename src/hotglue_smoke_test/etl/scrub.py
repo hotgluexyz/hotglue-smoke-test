@@ -22,7 +22,8 @@ _ISO_TEMPORAL_RE = re.compile(
 )
 _HASH_SUFFIX = ".hash.snapshot"
 # Schema / mapping files — scrubbing breaks ETL field paths and catalog_types.
-_SKIP_SCRUB_NAMES = frozenset(
+# Overridable via ETLSmokeRunner.SKIP_SCRUB_NAMES in record-etl.py.
+DEFAULT_SKIP_SCRUB_NAMES = frozenset(
     {
         "catalog.json",
         "selectedTables.json",
@@ -300,10 +301,16 @@ def scrub_tree(
     token_keys: set[str],
     should_scrub_key: ShouldScrubKey,
     split_composite: SplitComposite | None = None,
+    skip_scrub_names: set[str] | frozenset[str] | None = None,
     cache: dict | None = None,
 ) -> None:
     """Scrub parquet/csv/json under root in place (deterministic)."""
     cache = {} if cache is None else cache
+    skip_names = (
+        DEFAULT_SKIP_SCRUB_NAMES
+        if skip_scrub_names is None
+        else frozenset(skip_scrub_names)
+    )
     replace_fn = make_deterministic_replace_fn(
         preserve_values=preserve_values,
         cache=cache,
@@ -312,7 +319,7 @@ def scrub_tree(
     for path in sorted(root.rglob("*")):
         if not path.is_file():
             continue
-        if path.name in _SKIP_SCRUB_NAMES:
+        if path.name in skip_names:
             continue
         if path.suffix.lower() not in {".parquet", ".csv", ".json"}:
             continue

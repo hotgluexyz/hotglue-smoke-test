@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from hotglue_smoke_test.artifacts import etl_datetime_has_expected, list_etl_datetime_dirs
-from hotglue_smoke_test.etl.scrub import scrub_tree
+from hotglue_smoke_test.etl.scrub import DEFAULT_SKIP_SCRUB_NAMES, scrub_tree
 
 
 class ETLSmokeRunner(ABC):
@@ -41,6 +41,8 @@ class ETLSmokeRunner(ABC):
     PRESERVE_VALUES: set[Any] = set()
     PRESERVE_KEYS: set[str] = set()
     TOKEN_KEYS: set[str] = set()
+    # Filenames under fixtures/ left unsanitized (schema/mapping). Override in record-etl.py.
+    SKIP_SCRUB_NAMES: set[str] = set(DEFAULT_SKIP_SCRUB_NAMES)
 
     def __init__(self, test_case: str, tests_dir: str | Path):
         self.test_case = test_case
@@ -146,6 +148,7 @@ class ETLSmokeRunner(ABC):
             "token_keys": token_keys,
             "should_scrub_key": self.should_scrub_key,
             "split_composite": self.split_composite_value,
+            "skip_scrub_names": _as_set(self.SKIP_SCRUB_NAMES),
         }
 
     def _python_for_script(self) -> str:
