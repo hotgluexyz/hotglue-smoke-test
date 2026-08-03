@@ -80,15 +80,15 @@ git push origin 1.0.0
 
 ```bash
 # 1.1 TAP - Record VCR cassette (live API; discards Singer output), then scrub secrets/PII
-# 1.2 ETL - Append YYYYMMDDTHHMMSS/fixtures/ (input: sync-output + seed snapshots), scrub
+# 1.2 ETL - Append datetime/fixtures/ (input: sync-output + seed snapshots), scrub
 hotglue-smoke-test record orders_test
 
 # 2.1 TAP - Replay cassette → write expected_output/
-# 2.2 ETL - Per UTC datetime: etl.py → datetime/expected_output/; skip folders that already have it unless --force
+# 2.2 ETL - Per datetime folder: etl.py → datetime/expected_output/; skip folders that already have it unless --force
 hotglue-smoke-test generate orders_test
 
 # 3.1 TAP - Replay cassette → test_runtime/ → compare (CI uses bare `run` = all cases)
-# 3.2 ETL - Per UTC datetime: etl.py → datetime/test_runtime/ → compare to datetime/expected_output/
+# 3.2 ETL - Per datetime folder: etl.py → datetime/test_runtime/ → compare to datetime/expected_output/
 hotglue-smoke-test run
 hotglue-smoke-test run orders_test
 ```
@@ -97,14 +97,14 @@ hotglue-smoke-test run orders_test
 
 **ETL:** each `record` creates `<case>/<YYYYMMDDTHHMMSS>/fixtures/` (**input**, folder name is **UTC**). First run seeds `fixtures/snapshots/`; later runs get snapshots from the previous job's `expected_output/snapshots` (or runtime) at `generate`/`run`. `generate` fills only datetime folders missing `expected_output/` unless `--force`. Fakes are hash-seeded. `PRESERVE_*` keep enum/filter literals real.
 
-Auto-detect: `record-etl.py` → ETL; else repo name `target-*` → target, `tap-*` → tap. Folder validate/wipe lives in `artifacts.py` (CLI `_prepare_case`) for both taps and ETLs — same lifecycle as taps. Add `--force` on `record`/`generate` to overwrite. Override the repo root with `--connector-directory` only when not running from cwd.
+Auto-detect: `record-etl.py` → ETL; elif repo name `target-*` → target, else `tap-*` → tap. Folder validate/wipe lives in `artifacts.py` (CLI `_prepare_case`) for both taps and ETLs. Add `--force` on `record`/`generate` to overwrite.
 
 ### `--force` semantics
 
 | Command | Without `--force` | With `--force` |
 |---------|-------------------|----------------|
 | `record` (tap) | Fails if `fixtures/vcr.yaml` exists | Wipes `fixtures/`, `expected_output/`, `test_runtime/`, then live-records + scrub |
-| `record` (ETL) | Always appends a new UTC datetime folder with `fixtures/` | Wipes all UTC datetime dirs (keeps `test-config.json`), then appends a fresh one |
+| `record` (ETL) | Always appends a new datetime folder with `fixtures/` | Wipes all datetime dirs (keeps `test-config.json`), then appends a fresh one |
 | `generate` (tap) | Fails if data.singer/state.json output exists | Wipes `expected_output/` and `test_runtime/`, then regenerates from cassette |
 | `generate` (ETL) | Generates only datetime folders missing `expected_output/`; errors if all exist | Wipes each datetime's `expected_output/` + `test_runtime/`, then regenerates all |
 
@@ -134,11 +134,11 @@ hotglue-smoke-test record bank_transactions_test              # append datetime/
 hotglue-smoke-test generate bank_transactions_test            # → datetime/expected_output/
 hotglue-smoke-test run bank_transactions_test                 # → datetime/test_runtime/ → diff
 
-hotglue-smoke-test record bank_transactions_test              # append another fixtures
+hotglue-smoke-test record bank_transactions_test              # append new datetime/fixtures/ (input)
 hotglue-smoke-test generate bank_transactions_test            # only fills new expected_output/
 hotglue-smoke-test run bank_transactions_test
 
-hotglue-smoke-test generate --force bank_transactions_test    # refresh all datetime after etl.py change
+hotglue-smoke-test generate --force bank_transactions_test    # refresh all datetime/expected_output/ after etl.py change
 hotglue-smoke-test run bank_transactions_test
 ```
 
