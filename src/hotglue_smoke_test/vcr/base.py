@@ -9,6 +9,7 @@ import vcr
 from faker import Faker
 from freezegun import freeze_time
 
+from hotglue_smoke_test.vcr.coerce import coerce_request_plain_strings
 from hotglue_smoke_test.vcr.sanitize import (
     sanitize_cassette_file,
     sanitize_config_credentials,
@@ -143,6 +144,7 @@ class VCRBaseTestRunner(ABC):
             filter_headers=list(self.FILTER_HEADERS),
             filter_post_data_parameters=list(self.TOKEN_KEYS),
             filter_query_parameters=filter_query_parameters,
+            before_record_request=coerce_request_plain_strings,
         )
 
     @abstractmethod

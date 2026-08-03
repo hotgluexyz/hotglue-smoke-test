@@ -17,6 +17,7 @@ from hotglue_smoke_test.artifacts import (
     wipe_record_artifacts,
 )
 from hotglue_smoke_test.vcr.base import VCRBaseTestRunner
+from hotglue_smoke_test.vcr.coerce import coerce_request_plain_strings
 from hotglue_smoke_test.vcr.sanitize import (
     load_cassette,
     sanitize_cassette_file,
@@ -158,6 +159,39 @@ def _check_sanitize_round_trip(tmp: Path) -> None:
         raise AssertionError("expected NotImplementedError for non-JSON body")
 
 
+def _check_coerce_request_plain_strings() -> None:
+    """Str subclasses (e.g. SDK SecretString) must not reach VCR's safe YAML dumper."""
+    from vcr.request import Request
+    from vcr.serialize import serialize
+    from vcr.serializers import yamlserializer
+
+    class SecretLike(str):
+        pass
+
+    request = Request(
+        "POST",
+        "https://example.com/login",
+        b"",
+        {"x-api-key": SecretLike("secret"), "x-client-id": SecretLike("id")},
+    )
+    coerce_request_plain_strings(request)
+
+    cassette_dict = {
+        "requests": [request],
+        "responses": [
+            {
+                "status": {"code": 200, "message": "OK"},
+                "headers": {},
+                "body": {"string": b"{}"},
+            }
+        ],
+    }
+    yaml_text = serialize(cassette_dict, yamlserializer)
+    assert "SecretLike" not in yaml_text
+    assert "python/object" not in yaml_text
+    assert "secret" in yaml_text
+
+
 def main() -> None:
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -201,6 +235,7 @@ def main() -> None:
         assert not (case / "test_runtime").exists()
 
         _check_sanitize_round_trip(Path(tmp) / "sanitize_check")
+        _check_coerce_request_plain_strings()
 
         def _exit(code):
             raise SystemExit(code)
