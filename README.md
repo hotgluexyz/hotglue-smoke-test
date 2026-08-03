@@ -159,4 +159,7 @@ One Runner serves many `*_test` case folders; per-case `flow` / `job_type` / `te
 go in `<case>/test-config.json`. CLI shells out to `record-etl.py` with `SMOKE_TEST_MODE`
 the same way it shells out to `record-vcr.py`.
 
+ETL `run` compare (per UTC datetime): Singer `data.singer` when present, JSON etl-output,
+CSV etl-output, then snapshots (CSV via legacy folder compare; parquet/json pairwise).
+
 Self-check: `python -m hotglue_smoke_test.self_check`

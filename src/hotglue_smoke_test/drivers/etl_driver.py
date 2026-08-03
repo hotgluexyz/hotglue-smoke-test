@@ -6,44 +6,12 @@ import os
 import unittest
 from pathlib import Path
 
-import pandas as pd
-
 from hotglue_smoke_test.artifacts import list_etl_datetime_dirs
+from hotglue_smoke_test.compare.csv_output_comparator import compare_csv_folder
+from hotglue_smoke_test.compare.json_output_comparator import JsonOutputComparator
 from hotglue_smoke_test.compare.singer_output_comparator import SingerOutputComparator
+from hotglue_smoke_test.compare.snapshot_output_comparator import compare_snapshots
 from hotglue_smoke_test.compare.test_configurer import TestConfigurer
-
-
-def _compare_snapshot_trees(expected: Path, actual: Path, label: str) -> None:
-    if not expected.is_dir():
-        return
-    assert actual.is_dir(), f"[{label}] missing actual snapshots at {actual}"
-
-    expected_files = sorted(
-        p.relative_to(expected)
-        for p in expected.rglob("*")
-        if p.is_file() and p.suffix.lower() in {".csv", ".parquet", ".json"}
-    )
-    for rel in expected_files:
-        exp_path = expected / rel
-        act_path = actual / rel
-        assert act_path.is_file(), f"[{label}] missing snapshot file {act_path}"
-        suffix = exp_path.suffix.lower()
-        if suffix == ".parquet":
-            pd.testing.assert_frame_equal(
-                pd.read_parquet(exp_path),
-                pd.read_parquet(act_path),
-                check_dtype=False,
-            )
-        elif suffix == ".csv":
-            pd.testing.assert_frame_equal(
-                pd.read_csv(exp_path),
-                pd.read_csv(act_path),
-                check_dtype=False,
-            )
-        else:
-            assert exp_path.read_text() == act_path.read_text(), (
-                f"[{label}] snapshot json mismatch: {rel}"
-            )
 
 
 class TestEtl(unittest.TestCase):
@@ -58,20 +26,38 @@ class TestEtl(unittest.TestCase):
 
         for job_dir in jobs:
             stamp = job_dir.name
+            label = f"{case_name}/{stamp}"
             expected_etl = job_dir / "expected_output" / "etl-output"
             actual_etl = job_dir / "test_runtime" / "etl-output"
             print(
                 f"[ETL COMPARE] datetime={stamp} expected={expected_etl} actual={actual_etl}"
             )
 
-            if (expected_etl / "data.singer").is_file():
-                SingerOutputComparator(
-                    str(expected_etl), str(actual_etl), test_config
+            if expected_etl.is_dir():
+                if (expected_etl / "data.singer").is_file():
+                    print(f"[SINGER COMPARE] {label}")
+                    SingerOutputComparator(
+                        str(expected_etl), str(actual_etl), test_config
+                    ).compare()
+
+                print(f"[JSON COMPARE] {label}")
+                JsonOutputComparator(
+                    label, str(expected_etl), str(actual_etl), test_config
                 ).compare()
 
-            _compare_snapshot_trees(
+                print(f"[CSV COMPARE] etl-output {label}")
+                compare_csv_folder(
+                    label,
+                    str(actual_etl),
+                    str(expected_etl),
+                    {"test_config": test_config},
+                )
+
+            print(f"[SNAPSHOT COMPARE] {label}")
+            compare_snapshots(
                 job_dir / "expected_output" / "snapshots",
                 job_dir / "test_runtime" / "snapshots",
-                label=f"{case_name}/{stamp}",
+                label=label,
+                test_config=test_config,
             )
-            print(f"PASSED!!: {case_name}/{stamp}")
+            print(f"PASSED!!: {label}")

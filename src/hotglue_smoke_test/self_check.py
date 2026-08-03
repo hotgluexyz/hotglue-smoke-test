@@ -28,6 +28,10 @@ from hotglue_smoke_test.vcr.sanitize import (
     scrub_response_body,
     write_cassette,
 )
+from hotglue_smoke_test.compare.csv_output_comparator import compare_csv_folder
+from hotglue_smoke_test.compare.json_output_comparator import JsonOutputComparator
+from hotglue_smoke_test.compare.snapshot_output_comparator import compare_snapshots
+from hotglue_smoke_test.compare.test_configurer import TestConfigurer
 from hotglue_smoke_test.etl.scrub import make_deterministic_replace_fn
 
 
@@ -74,6 +78,23 @@ def _check_etl_deterministic_scrub() -> None:
     iso = "2026-07-03T13:00:00"
     assert plain("settled_at", iso) == iso
     assert plain("due_date", "2026-07-15") == "2026-07-15"
+
+
+def _check_etl_compare_noops(tmp: Path) -> None:
+    """JSON/CSV compare no-op when etl-output has no json/csv (Singer-only cases)."""
+    tmp.mkdir(parents=True, exist_ok=True)
+    cfg = TestConfigurer.get_test_config(str(tmp))
+    assert "dtypes_config" in cfg
+    expected = tmp / "expected"
+    actual = tmp / "actual"
+    expected.mkdir()
+    actual.mkdir()
+    (expected / "data.singer").write_text("{}\n")
+    (actual / "data.singer").write_text("{}\n")
+    JsonOutputComparator("noop", str(expected), str(actual), cfg).compare()
+    compare_csv_folder("noop", str(actual), str(expected), {"test_config": cfg})
+    compare_snapshots(tmp / "missing_snaps", tmp / "missing_snaps", label="noop", test_config=cfg)
+
 
 def _swallow_success_system_exit(fn) -> None:
     """Same contract as VCRBaseTestRunner.run_test around launch()."""
@@ -262,6 +283,7 @@ def main() -> None:
 
         _check_sanitize_round_trip(Path(tmp) / "sanitize_check")
         _check_etl_deterministic_scrub()
+        _check_etl_compare_noops(Path(tmp) / "etl_compare_noop")
 
         def _exit(code):
             raise SystemExit(code)
