@@ -135,6 +135,7 @@ class VCRBaseTestRunner(ABC):
             scrub_response=lambda body: scrub_response_body(
                 body, set(self.PRESERVE_KEYS), faker, cache, set(self.TOKEN_KEYS)
             ),
+            token_keys=set(self.TOKEN_KEYS),
         )
 
     def vcr_use_cassette(self, filter_query_parameters):

@@ -91,6 +91,32 @@ def redact_credential(value: Any) -> Any:
     return value
 
 
+def _request_header_is_credential(header_name: str, token_keys: set[str]) -> bool:
+    """True when a recorded request header carries a credential we redact elsewhere."""
+    normalized = header_name.lower().replace("-", "_")
+    if normalized in {"authorization", "proxy_authorization"}:
+        return True
+    if normalized in token_keys:
+        return True
+    if normalized.startswith("x_") and normalized[2:] in token_keys:
+        return True
+    return False
+
+
+def scrub_request_headers(headers: dict, token_keys: set[str]) -> dict:
+    """Redact credential values in a VCR request header map (values are usually lists)."""
+    if not headers:
+        return headers
+    for name, values in list(headers.items()):
+        if not _request_header_is_credential(name, token_keys):
+            continue
+        if isinstance(values, list):
+            headers[name] = [redact_credential(value) for value in values]
+        else:
+            headers[name] = redact_credential(values)
+    return headers
+
+
 def scrub_tokens_in_json(data: Any, token_keys: set[str]) -> Any:
     """Replace credential values (any depth) with a stable prefix*** placeholder."""
     if isinstance(data, dict):
@@ -272,14 +298,17 @@ def sanitize_cassette_file(
     *,
     scrub_response: Callable[[str], str] | None = None,
     scrub_uri: Callable[[str], str] | None = None,
+    token_keys: set[str] | None = None,
 ) -> None:
-    """Load cassette, scrub response bodies (and optional URIs), write back in place."""
+    """Load cassette, scrub request headers, response bodies, and optional URIs; write back."""
     path = Path(path)
     cassette = load_cassette(path)
     interactions = cassette.get("interactions") or []
 
     for interaction in interactions:
         request = interaction.get("request") or {}
+        if token_keys and "headers" in request:
+            scrub_request_headers(request["headers"], token_keys)
         if scrub_uri and "uri" in request:
             request["uri"] = scrub_uri(request["uri"])
 

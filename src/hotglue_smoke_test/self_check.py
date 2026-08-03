@@ -22,6 +22,7 @@ from hotglue_smoke_test.vcr.sanitize import (
     load_cassette,
     sanitize_cassette_file,
     sanitize_config_credentials,
+    scrub_request_headers,
     scrub_response_body,
     write_cassette,
 )
@@ -192,6 +193,21 @@ def _check_coerce_request_plain_strings() -> None:
     assert "secret" in yaml_text
 
 
+def _check_scrub_request_headers() -> None:
+    headers = {
+        "x-api-key": ["ee1fde434ac9e466911792984224ed759350b44cebbbb7eeaa460396dbe4973afd1e55a64e3b68ed8d8fdda8349e2f05"],
+        "x-client-id": ["NA4KW18OSOO8ByF6jpRigg"],
+        "x-login-as": ["acct_Gi53IF2RP8q5SQiwlC2CAw"],
+        "User-Agent": ["python-requests/2.34.2"],
+    }
+    token_keys = set(VCRBaseTestRunner.TOKEN_KEYS)
+    scrub_request_headers(headers, token_keys)
+    assert headers["x-api-key"] == ["ee1***"]
+    assert headers["x-client-id"] == ["NA4***"]
+    assert headers["x-login-as"] == ["acct_Gi53IF2RP8q5SQiwlC2CAw"]
+    assert headers["User-Agent"] == ["python-requests/2.34.2"]
+
+
 def main() -> None:
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -236,6 +252,7 @@ def main() -> None:
 
         _check_sanitize_round_trip(Path(tmp) / "sanitize_check")
         _check_coerce_request_plain_strings()
+        _check_scrub_request_headers()
 
         def _exit(code):
             raise SystemExit(code)
