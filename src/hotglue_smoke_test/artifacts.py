@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -158,6 +159,45 @@ def validate_no_scrub_case_name(testcase: str) -> None:
         f"--no-scrub requires a case name matching unsanitized_*_test "
         f"(got {testcase!r}); rename/use {suggested!r} and add to .gitignore:\n"
         "**/__smoke-tests__/unsanitized_*_test/"
+    )
+
+
+def validate_no_scrub_gitignored(case_dir: Path) -> None:
+    """Require the case path to be gitignored when a git checkout is available.
+
+    Outside a git repo (or if ``git`` is missing), only warn — name check still applies.
+    Trailing ``/`` makes directory gitignore rules (``…/unsanitized_*_test/``) match
+    even before the case folder exists.
+    """
+    probe = str(case_dir.resolve())
+    if not probe.endswith("/"):
+        probe += "/"
+    try:
+        result = subprocess.run(
+            ["git", "check-ignore", "-q", "--", probe],
+            cwd=str(case_dir.parent),
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        print(
+            "Warning: git not found; cannot verify --no-scrub case is gitignored",
+            file=sys.stderr,
+        )
+        return
+    if result.returncode == 0:
+        return
+    if result.returncode == 1:
+        _die(
+            f"--no-scrub case path is not gitignored: {case_dir}; add to .gitignore:\n"
+            "**/__smoke-tests__/unsanitized_*_test/"
+        )
+    # e.g. 128: not a git repository
+    print(
+        f"Warning: cannot verify gitignore for {case_dir} "
+        f"(git check-ignore exited {result.returncode}); "
+        "ensure the unsanitized case is not committed",
+        file=sys.stderr,
     )
 
 

@@ -17,6 +17,7 @@ from hotglue_smoke_test.artifacts import (
     validate_etl_run,
     validate_generate,
     validate_no_scrub_case_name,
+    validate_no_scrub_gitignored,
     validate_record,
     validate_run,
     wipe_etl_generate_artifacts,
@@ -138,6 +139,7 @@ def _preflight_cases(
     if mode == "record" and no_scrub:
         for testcase in cases:
             validate_no_scrub_case_name(testcase)
+            validate_no_scrub_gitignored(smoke_test_dir / testcase)
     if is_etl:
         if mode == "record":
             validate_etl_record(connector_dir)
@@ -335,7 +337,9 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "Skip post-record scrub (debug only). Case must be named "
-            "unsanitized_*_test and gitignored"
+            "unsanitized_*_test. When run inside a git checkout, the case "
+            "path must be gitignored; otherwise that check is skipped and "
+            "keeping the case out of version control is an operator duty"
         ),
     )
     record_parser.set_defaults(func=_run_command, mode="record", force=False, no_scrub=False)
