@@ -266,11 +266,6 @@ class ETLSmokeRunner(ABC):
 
         for job_dir in jobs:
             fixtures = _fixtures_dir(job_dir)
-            if not fixtures.is_dir():
-                raise SystemExit(
-                    f"missing input fixtures at {fixtures}; re-record this datetime"
-                )
-
             expected = _expected_dir(job_dir)
             runtime = _runtime_dir(job_dir)
 

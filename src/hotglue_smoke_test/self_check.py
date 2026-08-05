@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -369,6 +370,11 @@ def main() -> None:
         (day1 / "expected_output" / "etl-output").mkdir(parents=True)
         (day1 / "test_runtime").mkdir()
         _assert_raises_system_exit(lambda: validate_etl_generate(etl_case, force=False))
+        validate_etl_run(etl_case)
+        shutil.rmtree(day1 / "fixtures")
+        _assert_raises_system_exit(lambda: validate_etl_run(etl_case))
+        _assert_raises_system_exit(lambda: validate_etl_generate(etl_case, force=True))
+        (day1 / "fixtures").mkdir()
         validate_etl_run(etl_case)
         wipe_etl_generate_artifacts(etl_case)
         assert (day1 / "fixtures").is_dir()

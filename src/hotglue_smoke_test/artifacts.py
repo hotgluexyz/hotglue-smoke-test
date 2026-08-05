@@ -165,6 +165,12 @@ def validate_etl_generate(case_dir: Path, force: bool) -> None:
     jobs = list_etl_datetime_dirs(case_dir)
     if not jobs:
         _die(f"no UTC datetime dirs under {case_dir}; run record first")
+    missing_fixtures = [d.name for d in jobs if not (d / "fixtures").is_dir()]
+    if missing_fixtures:
+        _die(
+            f"missing input fixtures for datetime dirs {missing_fixtures}; "
+            "re-record those datetimes"
+        )
     if not force and all(etl_datetime_has_expected(d) for d in jobs):
         _die(
             f"all datetime dirs under {case_dir} already have expected_output/; "
@@ -176,6 +182,12 @@ def validate_etl_run(case_dir: Path) -> None:
     jobs = list_etl_datetime_dirs(case_dir)
     if not jobs:
         _die(f"no UTC datetime dirs under {case_dir}; run record first")
+    missing_fixtures = [d.name for d in jobs if not (d / "fixtures").is_dir()]
+    if missing_fixtures:
+        _die(
+            f"missing input fixtures for datetime dirs {missing_fixtures}; "
+            "re-record those datetimes"
+        )
     missing = [d.name for d in jobs if not etl_datetime_has_expected(d)]
     if missing:
         _die(
