@@ -17,7 +17,6 @@ from hotglue_smoke_test.artifacts import (
     validate_etl_run,
     validate_generate,
     validate_no_scrub_case_name,
-    validate_no_scrub_gitignored,
     validate_record,
     validate_run,
     wipe_etl_generate_artifacts,
