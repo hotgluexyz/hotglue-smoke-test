@@ -76,14 +76,6 @@ def make_deterministic_replace_fn(
         if _is_temporal(value):
             return value
 
-        field = key.split(".")[-1].replace("_", "").lower()
-        # Keep amounts/rates/counts unless the column is clearly an id.
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
-            if field not in {"id", "remoteid", "inputid", "externalid"} and not field.endswith(
-                "id"
-            ):
-                return value
-
         # Optional connector split: scrub each side; PRESERVE_VALUES keeps enums.
         if isinstance(value, str) and split_composite is not None:
             parts = split_composite(value)

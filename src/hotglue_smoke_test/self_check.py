@@ -83,6 +83,9 @@ def _check_etl_deterministic_scrub() -> None:
     iso = "2026-07-03T13:00:00"
     assert plain("settled_at", iso) == iso
     assert plain("due_date", "2026-07-15") == "2026-07-15"
+    # Numerics scrub by default; keep via PRESERVE_* when ETL needs them.
+    assert plain("amount", 12.5) != 12.5
+    assert plain("paid", 100) != 100
 
     # Parquet list/struct cells are unhashable; preserve check must not crash.
     import numpy as np
