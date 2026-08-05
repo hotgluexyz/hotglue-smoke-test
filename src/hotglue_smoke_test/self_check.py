@@ -122,6 +122,8 @@ def _check_etl_deterministic_scrub() -> None:
         should_scrub_key=lambda _k: False,
     )
     assert scrubbed.iloc[0]["email"] != "real@example.com"
+    # Nested leaf keeps owning key so faker uses email-shaped replacement.
+    assert "@" in scrubbed.iloc[0]["email"]
     assert scrubbed.iloc[1][1] == "PENDING"
     assert scrubbed.iloc[1][0] != "secret_a"
 

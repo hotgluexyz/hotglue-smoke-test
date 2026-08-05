@@ -114,21 +114,26 @@ def scrub_json(
     token_keys: set[str],
     should_scrub_key: ShouldScrubKey,
     scrub_dict_keys: bool = True,
+    key: str = "",
 ) -> Any:
-    """Scrub JSON leaves (and optionally dict keys via should_scrub_key)."""
+    """Scrub JSON leaves (and optionally dict keys via should_scrub_key).
+
+    ``key`` is the owning field name passed to ``replace_fn`` for leaves (and list
+    items), so nested values keep identifier/PII field context.
+    """
     if isinstance(obj, dict):
         out: dict[Any, Any] = {}
-        for key, value in obj.items():
-            key_str = key if isinstance(key, str) else str(key)
-            new_key: Any = key
+        for child_key, value in obj.items():
+            key_str = child_key if isinstance(child_key, str) else str(child_key)
+            new_key: Any = child_key
             if (
                 scrub_dict_keys
-                and isinstance(key, str)
-                and key not in preserve_keys
-                and key not in token_keys
-                and should_scrub_key(key)
+                and isinstance(child_key, str)
+                and child_key not in preserve_keys
+                and child_key not in token_keys
+                and should_scrub_key(child_key)
             ):
-                new_key = replace_fn(key_str, key)
+                new_key = replace_fn(key_str, child_key)
 
             if key_str in token_keys:
                 out[new_key] = redact_credential(value)
@@ -142,6 +147,7 @@ def scrub_json(
                     token_keys=token_keys,
                     should_scrub_key=should_scrub_key,
                     scrub_dict_keys=scrub_dict_keys,
+                    key=key_str,
                 )
         return out
     if isinstance(obj, list):
@@ -153,10 +159,11 @@ def scrub_json(
                 token_keys=token_keys,
                 should_scrub_key=should_scrub_key,
                 scrub_dict_keys=scrub_dict_keys,
+                key=key,
             )
             for item in obj
         ]
-    return replace_fn("", obj)
+    return replace_fn(key, obj)
 
 
 def _maybe_json_loads(value: Any) -> Any:
@@ -202,6 +209,7 @@ def scrub_series(
                 should_scrub_key=should_scrub_key,
                 # Nested payload keys are schema — scrub values only.
                 scrub_dict_keys=False,
+                key=column,
             )
             return json.dumps(scrubbed) if isinstance(value, str) else scrubbed
         return replace_fn(column, value)
