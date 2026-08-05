@@ -135,6 +135,16 @@ def wipe_etl_generate_artifacts(case_dir: Path) -> None:
         _rmtree(job_dir / "test_runtime")
 
 
+def validate_etl_record(script_root: Path) -> None:
+    """Require live sync-output under the script root."""
+    sync_src = script_root / "sync-output"
+    if not sync_src.is_dir():
+        _die(
+            f"missing raw sync-output at {sync_src}; put sync-output in the "
+            "script directory before recording"
+        )
+
+
 def validate_etl_generate(case_dir: Path, force: bool) -> None:
     jobs = list_etl_datetime_dirs(case_dir)
     if not jobs:
@@ -153,5 +163,6 @@ def validate_etl_run(case_dir: Path) -> None:
     missing = [d.name for d in jobs if not etl_datetime_has_expected(d)]
     if missing:
         _die(
-            f"missing expected_output for datetime dirs {missing}; run generate first"
+            f"missing expected_output for datetime dirs {missing}; run "
+            f"`hotglue-smoke-test generate {case_dir.name}` first"
         )

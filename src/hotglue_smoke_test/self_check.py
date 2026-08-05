@@ -11,6 +11,7 @@ from faker import Faker
 from hotglue_smoke_test.artifacts import (
     output_path,
     validate_etl_generate,
+    validate_etl_record,
     validate_etl_run,
     validate_generate,
     validate_record,
@@ -20,6 +21,7 @@ from hotglue_smoke_test.artifacts import (
     wipe_generate_artifacts,
     wipe_record_artifacts,
 )
+from hotglue_smoke_test.cli import _preflight_cases
 from hotglue_smoke_test.vcr.base import VCRBaseTestRunner
 from hotglue_smoke_test.vcr.sanitize import (
     load_cassette,
@@ -32,6 +34,7 @@ from hotglue_smoke_test.compare.csv_output_comparator import compare_csv_folder
 from hotglue_smoke_test.compare.json_output_comparator import JsonOutputComparator
 from hotglue_smoke_test.compare.snapshot_output_comparator import compare_snapshots
 from hotglue_smoke_test.compare.test_configurer import TestConfigurer
+from hotglue_smoke_test.etl.base import ETLSmokeRunner, _snapshot_flow_hint
 from hotglue_smoke_test.etl.scrub import make_deterministic_replace_fn
 
 
@@ -261,8 +264,82 @@ def main() -> None:
         assert not (case / "expected_output").exists()
         assert not (case / "test_runtime").exists()
 
+        tap_root = Path(tmp) / "tap-demo"
+        tap_smoke = tap_root / "__smoke-tests__"
+        tap_case = tap_smoke / "orders_test"
+        tap_case.mkdir(parents=True)
+        _assert_raises_system_exit(
+            lambda: _preflight_cases(
+                "run", ["orders_test"], tap_smoke, tap_root, False, False, False
+            )
+        )
+        (tap_case / "fixtures").mkdir()
+        (tap_case / "fixtures" / "vcr.yaml").write_text("cassette\n")
+        _assert_raises_system_exit(
+            lambda: _preflight_cases(
+                "run", ["orders_test"], tap_smoke, tap_root, False, False, False
+            )
+        )
+        (tap_case / "expected_output").mkdir()
+        (tap_case / "expected_output" / "data.singer").write_text("{}\n")
+        _preflight_cases(
+            "run", ["orders_test"], tap_smoke, tap_root, False, False, False
+        )
+
+        etl_root = Path(tmp) / "etl-demo"
+        etl_root.mkdir()
+        (etl_root / "__smoke-tests__").mkdir()
+        _assert_raises_system_exit(lambda: validate_etl_record(etl_root))
+        _assert_raises_system_exit(
+            lambda: _preflight_cases(
+                "record",
+                ["read_test"],
+                etl_root / "__smoke-tests__",
+                etl_root,
+                False,
+                True,
+                False,
+            )
+        )
+        (etl_root / "sync-output").mkdir()
+        validate_etl_record(etl_root)
+        _preflight_cases(
+            "record",
+            ["read_test"],
+            etl_root / "__smoke-tests__",
+            etl_root,
+            False,
+            True,
+            False,
+        )
+        etl_case_dir = etl_root / "__smoke-tests__" / "read_test"
+        etl_case_dir.mkdir()
+        day = etl_case_dir / "20260803T194829"
+        day.mkdir()
+        (day / "fixtures").mkdir()
+        _assert_raises_system_exit(
+            lambda: _preflight_cases(
+                "run",
+                ["read_test"],
+                etl_root / "__smoke-tests__",
+                etl_root,
+                False,
+                True,
+                False,
+            )
+        )
+
         etl_case = Path(tmp) / "bank_transactions_test"
         etl_case.mkdir()
+        (etl_case / "test-config.json").write_text('{"flow": "x"}\n')
+        etl_runner = ETLSmokeRunner("bank_transactions_test", Path(tmp))
+        assert etl_runner._case_env() == {"FLOW": "x"}
+        (etl_case / "test-config.json").unlink()
+        assert etl_runner._case_env() == {}
+        snapshots = etl_case / "snapshots"
+        snapshots.mkdir()
+        (snapshots / "contacts_Alv3Avor0.snapshot.csv").touch()
+        assert _snapshot_flow_hint(snapshots) == "contacts_Alv3Avor0.snapshot.csv"
         (etl_case / "test-config.json").write_text('{"flow": "x"}\n')
         day1 = etl_case / "20260701T120000"
         day1.mkdir()

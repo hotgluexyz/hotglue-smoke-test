@@ -7,6 +7,80 @@ Smoke-test harness for hotglue taps, ETLs, and targets (pending) scripts with **
 
 Run from the connector repo root or on the script directory (after installing into that venv).
 
+## Quickstart
+
+Install into the connector/script venv, then run from that directory.
+
+```bash
+uv pip install hotglue-smoke-test
+```
+
+### Tap
+
+Need `__smoke-tests__/record-vcr.py` and a case folder with live `config.json` and `catalog-selected.json`:
+
+```python
+# __smoke-tests__/record-vcr.py
+from hotglue_smoke_test.vcr.tap import VCRTapTestRunner
+
+class MyTapSmoke(VCRTapTestRunner):
+    # Optional: extra auth headers beyond default "authorization"
+    FILTER_HEADERS = [*VCRTapTestRunner.FILTER_HEADERS, "X-Vendor-Access-Token"]
+    # Keep values the tap reuses (PK, replication key, pagination / OAuth timing)
+    PRESERVE_KEYS = {"id", "updatedAt", "cursor", "expires_in"}
+
+    def module(self) -> str:
+        return "tap_example"
+
+    def launch(self):
+        from tap_example.tap import TapExample
+        TapExample.cli()
+
+if __name__ == "__main__":
+    MyTapSmoke.main()
+```
+
+```bash
+hotglue-smoke-test record orders_test     # live HTTP → fixtures/vcr.yaml → scrub
+hotglue-smoke-test generate orders_test   # replay → expected_output/data.singer
+hotglue-smoke-test run orders_test        # replay → compare
+```
+
+`module` + `launch` are required. Override `sanitize_cassette()` only when the default token scrub is not enough. Do not commit unsanitized cassettes (`--no-scrub` is debug-only).
+
+### ETL
+
+Need live `sync-output/` next to `etl.py` (seed `snapshots/` optional) and `__smoke-tests__/record-etl.py`:
+
+```python
+# __smoke-tests__/record-etl.py
+from pathlib import Path
+from hotglue_smoke_test.etl import ETLSmokeRunner, promote_external_ids_to_snapshots
+
+class MyETLSmoke(ETLSmokeRunner):
+    # Keep enum/filter columns and literal values the ETL compares as constants
+    PRESERVE_COLUMNS = {"status", "currency"}
+    PRESERVE_VALUES = {"ACTIVE", "USD"}
+    PRESERVE_KEYS = {"version"}          # JSON keys whose values stay real
+    TOKEN_KEYS = {"ApiKey"}              # force-scrub these values (san***)
+
+    def after_etl(self, root_dir: Path, *, flow: str | None = None) -> None:
+        # Optional: simulate target-written id maps between jobs
+        if flow:
+            promote_external_ids_to_snapshots(root_dir, flow)
+
+if __name__ == "__main__":
+    MyETLSmoke.main()
+```
+
+```bash
+hotglue-smoke-test record orders_test     # sync-output → <UTC>/fixtures/ (scrubbed)
+hotglue-smoke-test generate orders_test   # etl.py → <UTC>/expected_output/
+hotglue-smoke-test run orders_test        # replay → compare
+```
+
+A bare subclass works if scrub defaults are enough. Set `flow` / `job_type` / `tenant` in `<case>/test-config.json` (or on the runner) only when you must override `etl.py` defaults or match `*_<flow>.snapshot.*` names.
+
 ## Folders layout
 ### Tap
 ```
@@ -28,7 +102,7 @@ Mimics successive hotglue jobs: each `record` appends a new UTC datetime folder 
 ```
 script-dir/                  # folder with etl.py
   __smoke-tests__/
-    record-etl.py            # FLOW, PRESERVE_COLUMNS/VALUES/KEYS
+    record-etl.py            # runner + connector-specific scrub rules
     <case>_test/
       20260528T120000/       # job 1
         fixtures/            # INPUT (committed)
@@ -97,7 +171,7 @@ hotglue-smoke-test run orders_test
 
 **ETL:** each `record` creates `<case>/<YYYYMMDDTHHMMSS>/fixtures/` (**input**, folder name is **UTC**). First run seeds `fixtures/snapshots/`; later runs get snapshots from the previous job's `expected_output/snapshots` (or runtime) at `generate`/`run`. `generate` fills only datetime folders missing `expected_output/` unless `--force`. Fakes are hash-seeded. `PRESERVE_*` keep enum/filter literals real.
 
-Auto-detect: `record-etl.py` → ETL; elif repo name `target-*` → target, else `tap-*` → tap. Folder validate/wipe lives in `artifacts.py` (CLI `_prepare_case`) for both taps and ETLs. Add `--force` on `record`/`generate` to overwrite.
+Auto-detect: `record-etl.py` → ETL; elif repo name `target-*` → target; else tap. Validation is CLI `_preflight_cases` (artifacts helpers); `--force` wipes run in `_prepare_case`. Add `--force` on `record`/`generate` to overwrite.
 
 ### `--force` semantics
 
@@ -127,20 +201,9 @@ hotglue-smoke-test generate --force orders_test  # refresh data.singer/state.jso
 hotglue-smoke-test run orders_test
 ```
 
-**ETL:**
-
-```bash
-hotglue-smoke-test record bank_transactions_test              # append datetime/fixtures/ (input)
-hotglue-smoke-test generate bank_transactions_test            # → datetime/expected_output/
-hotglue-smoke-test run bank_transactions_test                 # → datetime/test_runtime/ → diff
-
-hotglue-smoke-test record bank_transactions_test              # append new datetime/fixtures/ (input)
-hotglue-smoke-test generate bank_transactions_test            # only fills new expected_output/
-hotglue-smoke-test run bank_transactions_test
-
-hotglue-smoke-test generate --force bank_transactions_test    # refresh all datetime/expected_output/ after etl.py change
-hotglue-smoke-test run bank_transactions_test
-```
+For ETL, another `record` appends a job; `generate` fills only the new
+`expected_output/`. Use `generate --force <case>` after changing `etl.py` to refresh
+all expected outputs, then run the case again.
 
 Connector `__smoke-tests__/record-vcr.py`:
 
@@ -156,9 +219,10 @@ override `split_composite_value` for ``left--right`` values (each side scrubbed;
 `PRESERVE_VALUES` keeps enums); override `SKIP_SCRUB_NAMES` to scrub or keep
 schema files (`catalog.json` / `mapping.json` / …); override `after_etl` when needed; end with
 `YourClass.main()` under `if __name__ == "__main__"`.
-One Runner serves many `*_test` case folders; per-case `flow` / `job_type` / `tenant`
-go in `<case>/test-config.json`. CLI shells out to `record-etl.py` with `SMOKE_TEST_MODE`
-the same way it shells out to `record-vcr.py`.
+One Runner serves many `*_test` case folders. Optional per-case `flow`, `job_type`,
+and `tenant` overrides go in `<case>/test-config.json`; unset values are omitted so
+`etl.py` keeps its defaults. CLI shells out to `record-etl.py` with
+`SMOKE_TEST_MODE` the same way it shells out to `record-vcr.py`.
 
 ETL `run` compare (per UTC datetime): Singer `data.singer` when present, JSON etl-output,
 CSV etl-output, then snapshots (CSV via legacy folder compare; parquet/json pairwise).

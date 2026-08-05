@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from hotglue_smoke_test.artifacts import etl_datetime_has_expected, list_etl_datetime_dirs
-from hotglue_smoke_test.etl.scrub import DEFAULT_SKIP_SCRUB_NAMES, scrub_tree
+from hotglue_smoke_test.etl.scrub import scrub_tree
 
 
 class ETLSmokeRunner(ABC):
@@ -29,20 +29,22 @@ class ETLSmokeRunner(ABC):
     Subclass in ``__smoke-tests__/record-etl.py`` and call ``YourClass.main()``.
     """
 
-    FLOW: str = ""
+    FLOW: str | None = None
     TENANT: str | None = None
-    JOB_TYPE: str = "read"
+    JOB_TYPE: str | None = None
     # Optional override of script root relative to parent of __smoke-tests__.
     SCRIPT_DIR: str | None = None
-    # Optional alternate dir that holds live sync-output/snapshots for record.
-    RAW_INPUT: str | None = None
 
     PRESERVE_COLUMNS: set[str] = set()
     PRESERVE_VALUES: set[Any] = set()
     PRESERVE_KEYS: set[str] = set()
     TOKEN_KEYS: set[str] = set()
-    # Filenames under fixtures/ left unsanitized (schema/mapping). Override in record-etl.py.
-    SKIP_SCRUB_NAMES: set[str] = set(DEFAULT_SKIP_SCRUB_NAMES)
+    # Schema / mapping files: scrubbing breaks ETL field paths and catalog_types.
+    SKIP_SCRUB_NAMES = {
+        "catalog.json",
+        "selectedTables.json",
+        "mapping.json",
+    }
 
     def __init__(self, test_case: str, tests_dir: str | Path):
         self.test_case = test_case
@@ -111,22 +113,20 @@ class ETLSmokeRunner(ABC):
         return json.loads(path.read_text())
 
     def _case_env(self) -> dict[str, str]:
-        """Resolve FLOW / JOB_TYPE / TENANT: test-config.json overrides class defaults."""
+        """Resolve explicitly configured job env; otherwise preserve etl.py defaults."""
         cfg = self._load_test_config()
         flow = cfg.get("flow") or cfg.get("FLOW") or self.FLOW
         job_type = cfg.get("job_type") or cfg.get("JOB_TYPE") or self.JOB_TYPE
-        tenant = (
-            cfg.get("tenant")
-            or cfg.get("TENANT")
-            or self.TENANT
-            or self.test_case
-        )
-        if not flow:
-            raise SystemExit(
-                f"{type(self).__name__}.FLOW unset and no flow in "
-                f"{self.case_dir / 'test-config.json'}"
+        tenant = cfg.get("tenant") or cfg.get("TENANT") or self.TENANT
+        return {
+            key: str(value)
+            for key, value in (
+                ("FLOW", flow),
+                ("JOB_TYPE", job_type),
+                ("TENANT", tenant),
             )
-        return {"flow": str(flow), "job_type": str(job_type), "tenant": str(tenant)}
+            if value is not None
+        }
 
     def _preserve_config(self) -> dict[str, Any]:
         preserve_columns = _as_set(self.PRESERVE_COLUMNS)
@@ -165,13 +165,8 @@ class ETLSmokeRunner(ABC):
         job_dir = self.case_dir / job_name
         fixtures = _fixtures_dir(job_dir)
 
-        raw_root = self.RAW_INPUT
-        raw_dir = Path(raw_root).resolve() if raw_root else self.script_root
-
-        sync_src = raw_dir / "sync-output"
-        snap_src = raw_dir / "snapshots"
-        if not sync_src.is_dir():
-            raise SystemExit(f"missing raw sync-output at {sync_src}")
+        sync_src = self.script_root / "sync-output"
+        snap_src = self.script_root / "snapshots"
 
         fixtures.mkdir(parents=True)
         _copy_tree(sync_src, fixtures / "sync-output")
@@ -225,12 +220,12 @@ class ETLSmokeRunner(ABC):
         if not etl_py.is_file():
             raise SystemExit(f"missing etl.py at {etl_py}")
 
-        settings = self._case_env()
-        flow = settings["flow"]
-        tenant = settings["tenant"]
-        job_type = settings["job_type"]
+        case_env = self._case_env()
+        flow = case_env.get("FLOW")
 
         env = os.environ.copy()
+        for key in ("FLOW", "JOB_TYPE", "TENANT"):
+            env.pop(key, None)
         env.update(
             {
                 "ROOT_DIR": str(root_dir),
@@ -238,19 +233,24 @@ class ETLSmokeRunner(ABC):
                 "output_dir": str(root_dir / "etl-output"),
                 "snapshot_dir": str(root_dir / "snapshots"),
                 "today": today,
-                "TENANT": tenant,
-                "FLOW": flow,
-                "JOB_TYPE": job_type,
                 "PYTHONPATH": str(self.script_root),
                 "VIRTUAL_ENV": str(self.script_root / ".venv"),
                 "PATH": f"{self.script_root / '.venv' / 'bin'}:{env.get('PATH', '')}",
             }
         )
+        env.update(case_env)
 
-        print(
-            f"command [ROOT_DIR={root_dir} FLOW={flow} JOB_TYPE={job_type} "
-            f"TENANT={tenant} {python} {etl_py}]"
-        )
+        snapshot_flow_hint = _snapshot_flow_hint(root_dir / "snapshots")
+        if flow is None and snapshot_flow_hint:
+            print(
+                f"Warning: {snapshot_flow_hint} may contain a flow suffix; set "
+                f"'flow' in {self.case_dir / 'test-config.json'} if etl.py must "
+                "use that same flow"
+            )
+
+        configured = " ".join(f"{key}={value}" for key, value in case_env.items())
+        configured = f" {configured}" if configured else ""
+        print(f"command [ROOT_DIR={root_dir}{configured} {python} {etl_py}]")
         subprocess.run([python, str(etl_py)], env=env, check=True, cwd=str(root_dir))
         self.after_etl(root_dir, flow=flow)
 
@@ -420,6 +420,19 @@ def _new_datetime_dir_name(case_dir: Path) -> str:
             return name
         time.sleep(1)
     raise SystemExit(f"could not allocate a unique UTC datetime dir under {case_dir}")
+
+
+def _snapshot_flow_hint(snapshots: Path) -> str | None:
+    if not snapshots.is_dir():
+        return None
+    for path in snapshots.rglob("*.snapshot.*"):
+        prefix = path.name.split(".snapshot.", 1)[0]
+        suffix = prefix.rsplit("_", 1)[-1]
+        # ponytail: filename hint only catches common alphanumeric flow IDs;
+        # explicit snapshot metadata should replace it if conventions diverge.
+        if "_" in prefix and len(suffix) >= 8 and suffix.isalnum():
+            return path.name
+    return None
 
 
 def _today_from_datetime_dir(name: str) -> str:

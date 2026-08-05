@@ -13,6 +13,7 @@ import pytest
 
 from hotglue_smoke_test.artifacts import (
     validate_etl_generate,
+    validate_etl_record,
     validate_etl_run,
     validate_generate,
     validate_record,
@@ -122,36 +123,57 @@ def _run_comparison(
         raise subprocess.CalledProcessError(exit_code, "pytest")
 
 
+def _preflight_cases(
+    mode: str,
+    cases: list[str],
+    smoke_test_dir: Path,
+    connector_dir: Path,
+    is_target: bool,
+    is_etl: bool,
+    force: bool,
+) -> None:
+    """Validate all selected cases before any banners or mutations."""
+    if is_etl:
+        if mode == "record":
+            validate_etl_record(connector_dir)
+            return
+        for testcase in cases:
+            case_dir = smoke_test_dir / testcase
+            if mode == "generate":
+                validate_etl_generate(case_dir, force)
+            elif mode == "run":
+                validate_etl_run(case_dir)
+        return
+    for testcase in cases:
+        case_dir = smoke_test_dir / testcase
+        if mode == "record":
+            validate_record(case_dir, force)
+        elif mode == "generate":
+            validate_generate(case_dir, is_target, force)
+        elif mode == "run":
+            validate_run(case_dir, is_target)
+
+
 def _prepare_case(
     mode: str,
     case_dir: Path,
-    is_target: bool,
     force: bool,
     *,
     is_etl: bool = False,
 ) -> None:
+    """Force-only wipes; validation runs in ``_preflight_cases``."""
+    if not force:
+        return
     if is_etl:
-        # ETL record is append-only (UTC datetime dirs); --force wipes those dirs.
         if mode == "record":
-            if force:
-                wipe_etl_record_artifacts(case_dir)
+            wipe_etl_record_artifacts(case_dir)
         elif mode == "generate":
-            validate_etl_generate(case_dir, force)
-            if force:
-                wipe_etl_generate_artifacts(case_dir)
-        elif mode == "run":
-            validate_etl_run(case_dir)
+            wipe_etl_generate_artifacts(case_dir)
         return
     if mode == "record":
-        validate_record(case_dir, force)
-        if force:
-            wipe_record_artifacts(case_dir)
+        wipe_record_artifacts(case_dir)
     elif mode == "generate":
-        validate_generate(case_dir, is_target, force)
-        if force:
-            wipe_generate_artifacts(case_dir)
-    elif mode == "run":
-        validate_run(case_dir, is_target)
+        wipe_generate_artifacts(case_dir)
 
 
 def _execute_case(
@@ -166,7 +188,7 @@ def _execute_case(
     no_scrub: bool = False,
 ) -> None:
     case_dir = smoke_test_dir / testcase
-    _prepare_case(mode, case_dir, is_target, force, is_etl=is_etl)
+    _prepare_case(mode, case_dir, force, is_etl=is_etl)
 
     if is_etl:
         label = {
@@ -207,6 +229,16 @@ def _run_command(args: argparse.Namespace) -> int:
     connector_name = connector_dir.name.removeprefix("tap-").removeprefix("target-")
     is_target = _is_target_repo(connector_dir)
     is_etl = _is_etl(smoke_test_dir)
+    cases = _discover_cases(smoke_test_dir, args.case_name)
+    _preflight_cases(
+        mode,
+        cases,
+        smoke_test_dir,
+        connector_dir,
+        is_target,
+        is_etl,
+        args.force,
+    )
 
     _print_section("Test Configuration")
     _print_status("INFO", f"Mode: {mode}")
@@ -221,8 +253,6 @@ def _run_command(args: argparse.Namespace) -> int:
     _print_status("INFO", f"Kind: {kind}")
     _print_status("INFO", f"Connector Directory: {connector_dir}")
     _print_status("INFO", f"Test Directory: {smoke_test_dir}")
-
-    cases = _discover_cases(smoke_test_dir, args.case_name)
 
     _print_section("Starting Execution")
     if args.case_name == "*":
