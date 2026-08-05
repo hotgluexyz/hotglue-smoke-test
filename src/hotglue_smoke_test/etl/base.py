@@ -209,6 +209,16 @@ class ETLSmokeRunner(ABC):
         (runtime / "etl-output").mkdir(exist_ok=True)
         (runtime / "snapshots").mkdir(exist_ok=True)
 
+    def _seed_snapshots(self, runtime: Path, previous: Path | None) -> None:
+        """Chain the previous job's post-ETL snapshots, else keep the seeded fixtures."""
+        if previous is None or not previous.is_dir():
+            return
+        snap_dest = runtime / "snapshots"
+        if snap_dest.exists():
+            shutil.rmtree(snap_dest)
+        shutil.copytree(previous, snap_dest)
+        print(f"Snapshot chained: '{previous}' -> '{snap_dest}'")
+
     def _run_etl(self, root_dir: Path, today: str) -> None:
         python = self._python_for_script()
         etl_py = self.script_root / "etl.py"
@@ -281,18 +291,7 @@ class ETLSmokeRunner(ABC):
                 shutil.rmtree(runtime)
 
             self._prepare_runtime_from_fixtures(fixtures, runtime)
-
-            snap_dest = runtime / "snapshots"
-            seeded = fixtures / "snapshots"
-            if previous_snapshots and previous_snapshots.is_dir():
-                if snap_dest.exists():
-                    shutil.rmtree(snap_dest)
-                shutil.copytree(previous_snapshots, snap_dest)
-                print(f"Snapshot chained: '{previous_snapshots}' -> '{snap_dest}'")
-            elif seeded.is_dir() and any(seeded.iterdir()):
-                pass
-            else:
-                snap_dest.mkdir(exist_ok=True)
+            self._seed_snapshots(runtime, previous_snapshots)
 
             self._run_etl(runtime, _today_from_datetime_dir(job_dir.name))
 
@@ -319,16 +318,7 @@ class ETLSmokeRunner(ABC):
                 shutil.rmtree(runtime)
 
             self._prepare_runtime_from_fixtures(fixtures, runtime)
-
-            snap_dest = runtime / "snapshots"
-            seeded = fixtures / "snapshots"
-            if previous_snapshots and previous_snapshots.is_dir():
-                if snap_dest.exists():
-                    shutil.rmtree(snap_dest)
-                shutil.copytree(previous_snapshots, snap_dest)
-                print(f"Snapshot chained: '{previous_snapshots}' -> '{snap_dest}'")
-            elif not (seeded.is_dir() and any(seeded.iterdir())):
-                snap_dest.mkdir(exist_ok=True)
+            self._seed_snapshots(runtime, previous_snapshots)
 
             self._run_etl(runtime, _today_from_datetime_dir(job_dir.name))
             previous_snapshots = runtime / "snapshots"
