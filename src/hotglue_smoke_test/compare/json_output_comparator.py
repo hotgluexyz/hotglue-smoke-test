@@ -41,7 +41,7 @@ class JsonOutputComparator:
             f"Found {len(json_files)} file(s)."
         )
 
-    def _read_json_folder(self, folder_path, ignore_streams, ignore_columns_config):
+    def _read_json_folder(self, folder_path, ignore_streams, ignore_columns_config):  # noqa: C901
         """
         Read multiple JSON files in a folder and organize records by stream, excluding ignored columns.
 

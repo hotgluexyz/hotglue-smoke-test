@@ -12,7 +12,7 @@ pd.set_option("expand_frame_repr", False)
 pd.set_option("display.max_columns", 999)
 
 
-def compare_csv_folder(label, actual_output_path, expected_output_path, options=None):
+def compare_csv_folder(label, actual_output_path, expected_output_path, options=None):  # noqa: C901
     options = options or {}
     test_config = options.get("test_config") or {}
     ignore_columns = test_config.get("ignore_columns") or {}
