@@ -14,6 +14,7 @@ from hotglue_smoke_test.artifacts import (
     validate_etl_record,
     validate_etl_run,
     validate_generate,
+    validate_no_scrub_case_name,
     validate_record,
     validate_run,
     wipe_etl_generate_artifacts,
@@ -263,6 +264,27 @@ def main() -> None:
         assert (case / "fixtures" / "vcr.yaml").is_file()
         assert not (case / "expected_output").exists()
         assert not (case / "test_runtime").exists()
+
+        validate_no_scrub_case_name("unsanitized_internal_server_error_retry_test")
+        validate_no_scrub_case_name("unsanitized_read_test")
+        _assert_raises_system_exit(
+            lambda: validate_no_scrub_case_name("orders_test")
+        )
+        _assert_raises_system_exit(
+            lambda: validate_no_scrub_case_name("read_test")
+        )
+        _assert_raises_system_exit(
+            lambda: _preflight_cases(
+                "record",
+                ["orders_test"],
+                Path(tmp) / "tap-demo" / "__smoke-tests__",
+                Path(tmp) / "tap-demo",
+                False,
+                False,
+                False,
+                no_scrub=True,
+            )
+        )
 
         tap_root = Path(tmp) / "tap-demo"
         tap_smoke = tap_root / "__smoke-tests__"

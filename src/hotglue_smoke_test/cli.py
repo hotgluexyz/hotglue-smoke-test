@@ -16,6 +16,7 @@ from hotglue_smoke_test.artifacts import (
     validate_etl_record,
     validate_etl_run,
     validate_generate,
+    validate_no_scrub_case_name,
     validate_record,
     validate_run,
     wipe_etl_generate_artifacts,
@@ -131,8 +132,12 @@ def _preflight_cases(
     is_target: bool,
     is_etl: bool,
     force: bool,
+    no_scrub: bool = False,
 ) -> None:
     """Validate all selected cases before any banners or mutations."""
+    if mode == "record" and no_scrub:
+        for testcase in cases:
+            validate_no_scrub_case_name(testcase)
     if is_etl:
         if mode == "record":
             validate_etl_record(connector_dir)
@@ -238,6 +243,7 @@ def _run_command(args: argparse.Namespace) -> int:
         is_target,
         is_etl,
         args.force,
+        no_scrub=args.no_scrub,
     )
 
     _print_section("Test Configuration")
@@ -327,7 +333,10 @@ def build_parser() -> argparse.ArgumentParser:
     record_parser.add_argument(
         "--no-scrub",
         action="store_true",
-        help="Skip post-record scrub (debug only; do not commit unsanitized cassettes)",
+        help=(
+            "Skip post-record scrub (debug only). Case must be named "
+            "unsanitized_*_test and gitignored"
+        ),
     )
     record_parser.set_defaults(func=_run_command, mode="record", force=False, no_scrub=False)
 

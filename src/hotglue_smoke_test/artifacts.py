@@ -145,6 +145,22 @@ def validate_etl_record(script_root: Path) -> None:
         )
 
 
+def validate_no_scrub_case_name(testcase: str) -> None:
+    """--no-scrub may only write under gitignored unsanitized_*_test/ case dirs."""
+    if testcase.startswith("unsanitized_") and testcase.endswith("_test"):
+        return
+    suggested = (
+        f"unsanitized_{testcase}"
+        if testcase.endswith("_test")
+        else f"unsanitized_{testcase}_test"
+    )
+    _die(
+        f"--no-scrub requires a case name matching unsanitized_*_test "
+        f"(got {testcase!r}); rename/use {suggested!r} and add to .gitignore:\n"
+        "**/__smoke-tests__/unsanitized_*_test/"
+    )
+
+
 def validate_etl_generate(case_dir: Path, force: bool) -> None:
     jobs = list_etl_datetime_dirs(case_dir)
     if not jobs:

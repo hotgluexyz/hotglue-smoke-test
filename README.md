@@ -46,7 +46,7 @@ hotglue-smoke-test generate orders_test   # replay → expected_output/data.sing
 hotglue-smoke-test run orders_test        # replay → compare
 ```
 
-`module` + `launch` are required. Override `sanitize_cassette()` only when the default token scrub is not enough. Do not commit unsanitized cassettes (`--no-scrub` is debug-only).
+`module` + `launch` are required. Override `sanitize_cassette()` only when the default token scrub is not enough.
 
 ### ETL
 
@@ -167,7 +167,7 @@ hotglue-smoke-test run
 hotglue-smoke-test run orders_test
 ```
 
-**Tap:** `record` scrubs by default after the live HTTP capture (cassette response bodies + connector `record-vcr.py` rules). Use `--no-scrub` only for local debug; do not commit unsanitized cassettes.
+**Tap:** `record` scrubs by default after the live HTTP capture (cassette response bodies + connector `record-vcr.py` rules).
 
 **ETL:** each `record` creates `<case>/<YYYYMMDDTHHMMSS>/fixtures/` (**input**, folder name is **UTC**). First run seeds `fixtures/snapshots/`; later runs get snapshots from the previous job's `expected_output/snapshots` (or runtime) at `generate`/`run`. `generate` fills only datetime folders missing `expected_output/` unless `--force`. Fakes are hash-seeded. `PRESERVE_*` keep enum/filter literals real.
 
