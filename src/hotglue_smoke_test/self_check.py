@@ -380,6 +380,17 @@ def main() -> None:
         assert (etl_case / "test-config.json").is_file()
         _assert_raises_system_exit(lambda: validate_etl_generate(etl_case, force=False))
 
+        mapping_root = Path(tmp) / "mapping-etl"
+        mapping_fixtures = mapping_root / "__smoke-tests__" / "read_test" / "fixtures"
+        mapping_fixtures.mkdir(parents=True)
+        (mapping_root / "mapping.json").write_text('{"source": true}\n')
+        (mapping_fixtures / "mapping.json").write_text('{"fixture": true}\n')
+        mapping_runtime = mapping_root / "test_runtime"
+        ETLSmokeRunner(
+            "read_test", mapping_root / "__smoke-tests__"
+        )._prepare_runtime_from_fixtures(mapping_fixtures, mapping_runtime)
+        assert (mapping_runtime / "mapping.json").read_text() == '{"source": true}\n'
+
         _check_sanitize_round_trip(Path(tmp) / "sanitize_check")
         _check_etl_deterministic_scrub()
         _check_etl_compare_noops(Path(tmp) / "etl_compare_noop")

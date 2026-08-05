@@ -97,7 +97,7 @@ tap-foo/
 
 Mimics successive hotglue jobs: each `record` appends a new UTC datetime folder (`YYYYMMDDTHHMMSS`); `generate`/`run` chain snapshots from the previous job’s post-ETL output.
 
-**`fixtures/` is the input** (scrubbed tap `sync-output`, seed `snapshots`, `mapping.json`, `catalog.json`).
+**`fixtures/` is the input** (scrubbed tap `sync-output`, seed `snapshots`, `catalog.json`). `mapping.json` stays beside `etl.py` and is copied only into `test_runtime/`.
 
 ```
 script-dir/                  # folder with etl.py
@@ -108,7 +108,6 @@ script-dir/                  # folder with etl.py
         fixtures/            # INPUT (committed)
           sync-output/
           snapshots/         # seed only on first day
-          mapping.json
           catalog.json
         expected_output/     # from generate (committed)
           etl-output/
@@ -217,7 +216,7 @@ ETL `__smoke-tests__/record-etl.py` subclasses `ETLSmokeRunner` (mirror of
 `VCRTapTestRunner`): override `should_scrub_key` when JSON dict keys must be scrubbed;
 override `split_composite_value` for ``left--right`` values (each side scrubbed;
 `PRESERVE_VALUES` keeps enums); override `SKIP_SCRUB_NAMES` to scrub or keep
-schema files (`catalog.json` / `mapping.json` / …); override `after_etl` when needed; end with
+schema files (`catalog.json` / `selectedTables.json` / …); override `after_etl` when needed; end with
 `YourClass.main()` under `if __name__ == "__main__"`.
 One Runner serves many `*_test` case folders. Optional per-case `flow`, `job_type`,
 and `tenant` overrides go in `<case>/test-config.json`; unset values are omitted so

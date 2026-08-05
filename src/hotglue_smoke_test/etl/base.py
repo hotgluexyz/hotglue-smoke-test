@@ -39,11 +39,10 @@ class ETLSmokeRunner(ABC):
     PRESERVE_VALUES: set[Any] = set()
     PRESERVE_KEYS: set[str] = set()
     TOKEN_KEYS: set[str] = set()
-    # Schema / mapping files: scrubbing breaks ETL field paths and catalog_types.
+    # Schema files: scrubbing breaks ETL field paths and catalog_types.
     SKIP_SCRUB_NAMES = {
         "catalog.json",
         "selectedTables.json",
-        "mapping.json",
     }
 
     def __init__(self, test_case: str, tests_dir: str | Path):
@@ -180,10 +179,6 @@ class ETLSmokeRunner(ABC):
         else:
             (fixtures / "snapshots").mkdir(exist_ok=True)
 
-        mapping_src = self.script_root / "mapping.json"
-        if mapping_src.is_file():
-            shutil.copy2(mapping_src, fixtures / "mapping.json")
-
         for extra in ("catalog.json", "selectedTables.json", "config.json"):
             src = self.script_root / extra
             if src.is_file():
@@ -200,17 +195,17 @@ class ETLSmokeRunner(ABC):
             shutil.rmtree(runtime)
         runtime.mkdir(parents=True)
         for item in fixtures.iterdir():
+            if item.name == "mapping.json":
+                continue
             dest = runtime / item.name
             if item.is_dir():
                 shutil.copytree(item, dest)
             else:
                 shutil.copy2(item, dest)
 
-        mapping = runtime / "mapping.json"
-        if not mapping.is_file():
-            src = self.script_root / "mapping.json"
-            if src.is_file():
-                shutil.copy2(src, mapping)
+        mapping = self.script_root / "mapping.json"
+        if mapping.is_file():
+            shutil.copy2(mapping, runtime / "mapping.json")
         (runtime / "etl-output").mkdir(exist_ok=True)
         (runtime / "snapshots").mkdir(exist_ok=True)
 
