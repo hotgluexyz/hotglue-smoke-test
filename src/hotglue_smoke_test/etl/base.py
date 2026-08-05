@@ -379,11 +379,7 @@ def promote_external_ids_to_snapshots(
 
 
 def _as_set(value: Any) -> set:
-    if value is None:
-        return set()
-    if isinstance(value, set):
-        return value
-    return set(value)
+    return set() if value is None else set(value)
 
 
 def _copy_tree(src: Path, dest: Path) -> None:
