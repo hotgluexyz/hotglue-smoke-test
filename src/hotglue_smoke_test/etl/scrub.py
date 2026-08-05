@@ -274,7 +274,8 @@ def scrub_file(
         return
 
     if suffix == ".csv":
-        df = pd.read_csv(path)
+        # Keep raw cell text (empty/"NA"/"001"); numerics scrub as strings via PRESERVE_*.
+        df = pd.read_csv(path, dtype=str, na_filter=False)
         scrubbed = scrub_dataframe(
             df,
             replace_fn=replace_fn,

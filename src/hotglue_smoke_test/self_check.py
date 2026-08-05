@@ -38,7 +38,7 @@ from hotglue_smoke_test.compare.json_output_comparator import JsonOutputComparat
 from hotglue_smoke_test.compare.snapshot_output_comparator import compare_snapshots
 from hotglue_smoke_test.compare.test_configurer import TestConfigurer
 from hotglue_smoke_test.etl.base import ETLSmokeRunner, _snapshot_flow_hint
-from hotglue_smoke_test.etl.scrub import make_deterministic_replace_fn, scrub_series
+from hotglue_smoke_test.etl.scrub import make_deterministic_replace_fn, scrub_file, scrub_series
 
 
 def _assert_raises_system_exit(fn) -> None:
@@ -126,6 +126,24 @@ def _check_etl_deterministic_scrub() -> None:
     assert "@" in scrubbed.iloc[0]["email"]
     assert scrubbed.iloc[1][1] == "PENDING"
     assert scrubbed.iloc[1][0] != "secret_a"
+
+    # CSV: do not turn empty/NA into NaN or coerce "001" to int before scrub.
+    csv_path = Path(tempfile.mkdtemp()) / "sample.csv"
+    csv_path.write_text("code,empty,marker,secret\n001,,NA,live-token\n")
+    scrub_file(
+        csv_path,
+        replace_fn=plain,
+        preserve_columns={"empty", "marker"},
+        preserve_values=preserve_values,
+        preserve_keys=set(),
+        token_keys=set(),
+        should_scrub_key=lambda _k: False,
+    )
+    cells = csv_path.read_text().strip().splitlines()[1].split(",")
+    assert cells[0] != "001"
+    assert cells[1] == ""
+    assert cells[2] == "NA"
+    assert cells[3] != "live-token"
 
 
 def _check_etl_compare_noops(tmp: Path) -> None:
