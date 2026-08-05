@@ -42,6 +42,14 @@ def _cache_key(value: Any) -> Any | None:
         return None
 
 
+def _is_preserved(value: Any, preserve_values: set[Any]) -> bool:
+    """Membership test that tolerates unhashable cells (Parquet list/struct columns)."""
+    try:
+        return value in preserve_values
+    except TypeError:
+        return False
+
+
 def _is_temporal(value: Any) -> bool:
     if isinstance(
         value,
@@ -62,7 +70,7 @@ def make_deterministic_replace_fn(
     def replace(key: str, value: Any) -> Any:
         if value is None or (isinstance(value, float) and pd.isna(value)):
             return value
-        if value in preserve_values:
+        if _is_preserved(value, preserve_values):
             return value
         # Timestamps/dates: keep as-is (ETL filters/groupbys; not PII scrub targets).
         if _is_temporal(value):
@@ -180,9 +188,11 @@ def scrub_series(
     def cell(value: Any) -> Any:
         if value is None or (isinstance(value, float) and pd.isna(value)):
             return value
-        if value in preserve_values:
+        if _is_preserved(value, preserve_values):
             return value
         parsed = _maybe_json_loads(value)
+        if hasattr(parsed, "tolist") and not isinstance(parsed, (str, bytes)):
+            parsed = parsed.tolist()
         if isinstance(parsed, (dict, list)):
             scrubbed = scrub_json(
                 parsed,

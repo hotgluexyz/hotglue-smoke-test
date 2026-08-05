@@ -37,7 +37,7 @@ from hotglue_smoke_test.compare.json_output_comparator import JsonOutputComparat
 from hotglue_smoke_test.compare.snapshot_output_comparator import compare_snapshots
 from hotglue_smoke_test.compare.test_configurer import TestConfigurer
 from hotglue_smoke_test.etl.base import ETLSmokeRunner, _snapshot_flow_hint
-from hotglue_smoke_test.etl.scrub import make_deterministic_replace_fn
+from hotglue_smoke_test.etl.scrub import make_deterministic_replace_fn, scrub_series
 
 
 def _assert_raises_system_exit(fn) -> None:
@@ -83,6 +83,25 @@ def _check_etl_deterministic_scrub() -> None:
     iso = "2026-07-03T13:00:00"
     assert plain("settled_at", iso) == iso
     assert plain("due_date", "2026-07-15") == "2026-07-15"
+
+    # Parquet list/struct cells are unhashable; preserve check must not crash.
+    import numpy as np
+    import pandas as pd
+
+    assert plain("tags", np.array(["secret_a", "PENDING"])) is not None
+    scrubbed = scrub_series(
+        pd.Series([{"email": "real@example.com"}, np.array(["secret_a", "PENDING"])]),
+        "payload",
+        replace_fn=plain,
+        preserve_columns=set(),
+        preserve_values=preserve_values,
+        preserve_keys=set(),
+        token_keys=set(),
+        should_scrub_key=lambda _k: False,
+    )
+    assert scrubbed.iloc[0]["email"] != "real@example.com"
+    assert scrubbed.iloc[1][1] == "PENDING"
+    assert scrubbed.iloc[1][0] != "secret_a"
 
 
 def _check_etl_compare_noops(tmp: Path) -> None:
