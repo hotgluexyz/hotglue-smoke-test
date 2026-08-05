@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -54,8 +55,7 @@ def _check_etl_deterministic_scrub() -> None:
 
     def split_composite(value: str):
         if "--" in value:
-            left, right = value.rsplit("--", 1)
-            return left, right
+            return re.split(r"(--)", value)
         return None
 
     a = {}
@@ -73,6 +73,25 @@ def _check_etl_deterministic_scrub() -> None:
         f"{ra('id', 'entity_abc123')}--USD"
     )
     assert ra("x", "USD--secret_id") == f"USD--{ra('id', 'secret_id')}"
+    # Mixed separators: even indices scrub, odd indices stay literal.
+    mixed = make_deterministic_replace_fn(
+        preserve_values=preserve_values,
+        cache={},
+        split_composite=lambda v: re.split(r"([-_])", v) if re.search(r"[-_]", v) else None,
+    )
+    scrubbed_mixed = mixed("x", "entityabc123-USD_PENDING")
+    assert scrubbed_mixed.endswith("-USD_PENDING")
+    assert not scrubbed_mixed.startswith("entityabc123")
+    # Even-length list means the hook lost a separator; fail loudly.
+    even = make_deterministic_replace_fn(
+        preserve_values=preserve_values, cache={}, split_composite=lambda v: v.split("|")
+    )
+    try:
+        even("x", "a|b")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected ValueError for even-length split_composite")
     # same process cache reuse
     assert a[(str, "entity_abc123")] == ra("InputId", "entity_abc123")
     # without split hook, whole string is one scrub unit

@@ -69,11 +69,13 @@ class ETLSmokeRunner(ABC):
         """
         return False
 
-    def split_composite_value(self, value: str) -> tuple[str, str] | None:
-        """Optionally split a composite so each side is scrubbed independently.
+    def split_composite_value(self, value: str) -> list[str] | None:
+        """Optionally split a composite so each part is scrubbed independently.
 
-        Return ``(left, right)`` to rejoin as ``left--right`` after replace
-        (``PRESERVE_VALUES`` keeps enums). Default: scrub the whole value.
+        Return an odd-length ``[part, sep, part, ...]`` list: even indices are scrubbed
+        (``PRESERVE_VALUES`` keeps enums), odd indices stay as literal separators, so
+        ``a-b_c`` round-trips with mixed separators. Default: scrub the whole value.
+        ``re.split`` with a capturing group produces this shape directly.
         """
         return None
 

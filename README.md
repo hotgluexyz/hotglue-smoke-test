@@ -214,8 +214,9 @@ Override `sanitize_cassette()` for connector-specific PII rules. Default base sc
 
 ETL `__smoke-tests__/record-etl.py` subclasses `ETLSmokeRunner` (mirror of
 `VCRTapTestRunner`): override `should_scrub_key` when JSON dict keys must be scrubbed;
-override `split_composite_value` for ``left--right`` values (each side scrubbed;
-`PRESERVE_VALUES` keeps enums); override `SKIP_SCRUB_NAMES` to scrub or keep
+override `split_composite_value` for composite values (return an odd-length
+``[part, sep, part, ...]`` list, e.g. `re.split(r"(--)", value)`; even indices are
+scrubbed, odd ones stay as separators); override `SKIP_SCRUB_NAMES` to scrub or keep
 schema files (`catalog.json` / `selectedTables.json` / …); override `after_etl` when needed; end with
 `YourClass.main()` under `if __name__ == "__main__"`.
 One Runner serves many `*_test` case folders. Optional per-case `flow`, `job_type`,

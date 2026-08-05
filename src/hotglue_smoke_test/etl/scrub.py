@@ -23,8 +23,9 @@ _ISO_TEMPORAL_RE = re.compile(
 _HASH_SUFFIX = ".hash.snapshot"
 
 ShouldScrubKey = Callable[[str], bool]
-# Return (left, right) to scrub each side via replace (PRESERVE_VALUES applies); else None.
-SplitComposite = Callable[[str], tuple[str, str] | None]
+# Return an odd-length interleaved list ``[part, sep, part, ...]``: even indices are
+# scrubbed via replace, odd indices are kept as literal separators. Else None.
+SplitComposite = Callable[[str], list[str] | None]
 
 
 def stable_seed(value: Any) -> int:
@@ -76,12 +77,19 @@ def make_deterministic_replace_fn(
         if _is_temporal(value):
             return value
 
-        # Optional connector split: scrub each side; PRESERVE_VALUES keeps enums.
+        # Optional connector split: scrub each part; PRESERVE_VALUES keeps enums.
         if isinstance(value, str) and split_composite is not None:
             parts = split_composite(value)
             if parts is not None:
-                left, right = parts
-                return f"{replace(key, left)}--{replace(key, right)}"
+                if len(parts) % 2 == 0:
+                    raise ValueError(
+                        "split_composite_value must return an odd-length "
+                        f"[part, sep, part, ...] list; got {parts!r}"
+                    )
+                return "".join(
+                    part if index % 2 else str(replace(key, part))
+                    for index, part in enumerate(parts)
+                )
 
         ck = _cache_key(value)
         if ck is not None and ck in cache:
