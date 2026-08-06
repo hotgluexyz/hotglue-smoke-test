@@ -44,6 +44,90 @@ def _swallow_success_system_exit(fn) -> None:
             raise
 
 
+class _StubVCRRunner(VCRBaseTestRunner):
+    """Minimal concrete runner for unit checks (no launch)."""
+
+    required_files = []
+
+    @property
+    def output_basename(self) -> str:
+        return "data.singer"
+
+    def module(self) -> str:
+        return "stub"
+
+    def run_launch(self):
+        pass
+
+    def launch(self):
+        pass
+
+    def argv(self) -> list[str]:
+        return []
+
+
+def _check_filter_response_headers(tmp: Path) -> None:
+    runner = _StubVCRRunner("case_test", str(tmp))
+
+    response = {
+        "status": {"code": 200, "message": "OK"},
+        "headers": {
+            "Set-Cookie": ["session=abc; Path=/"],
+            "WWW-Authenticate": ["Basic realm=test"],
+            "X-CSRF-Token": ["csrf-value"],
+            "Content-Type": ["application/json"],
+            "X-Request-Id": ["keep-me"],
+        },
+        "body": {"string": "{}"},
+    }
+    out = runner.before_record_response(response)
+    headers = out["headers"]
+    assert "Set-Cookie" not in headers
+    assert "WWW-Authenticate" not in headers
+    assert "X-CSRF-Token" not in headers
+    assert headers["Content-Type"] == ["application/json"]
+    assert headers["X-Request-Id"] == ["keep-me"]
+    assert out["body"] == {"string": "{}"}
+
+    # Matching is case-insensitive on both the allowlist and recorded keys.
+    mixed = runner.before_record_response(
+        {"headers": {"set-cookie": ["a=b"], "x-api-key": ["k"], "Accept": ["*/*"]}}
+    )
+    assert "set-cookie" not in mixed["headers"]
+    assert "x-api-key" not in mixed["headers"]
+    assert mixed["headers"]["Accept"] == ["*/*"]
+
+    assert runner.before_record_response({}) == {}
+    assert runner.before_record_response({"headers": None}) == {"headers": None}
+    assert runner.before_record_response({"headers": {}}) == {"headers": {}}
+
+    class _Extended(_StubVCRRunner):
+        FILTER_RESPONSE_HEADERS = [
+            *VCRBaseTestRunner.FILTER_RESPONSE_HEADERS,
+            "X-Custom-Secret",
+        ]
+
+    extended = _Extended("case_test", str(tmp))
+    custom = extended.before_record_response(
+        {
+            "headers": {
+                "X-Custom-Secret": ["s3cret"],
+                "Set-Cookie": ["session=abc"],
+                "Content-Type": ["application/json"],
+            }
+        }
+    )
+    assert "X-Custom-Secret" not in custom["headers"]
+    assert "Set-Cookie" not in custom["headers"]
+    assert custom["headers"]["Content-Type"] == ["application/json"]
+
+    # vcr_use_cassette wires before_record_response onto the cassette.
+    cassette_path = tmp / "fixtures" / "vcr.yaml"
+    cassette_path.parent.mkdir(parents=True, exist_ok=True)
+    with runner.vcr_use_cassette([]) as cassette:
+        assert cassette.before_record_response is runner.before_record_response
+
+
 def _check_sanitize_round_trip(tmp: Path) -> None:
     tmp.mkdir(parents=True, exist_ok=True)
     cassette_path = tmp / "vcr.yaml"
@@ -201,6 +285,7 @@ def main() -> None:
         assert not (case / "test_runtime").exists()
 
         _check_sanitize_round_trip(Path(tmp) / "sanitize_check")
+        _check_filter_response_headers(Path(tmp) / "filter_response_headers")
 
         def _exit(code):
             raise SystemExit(code)
