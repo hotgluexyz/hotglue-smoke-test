@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 
 from faker import Faker
+from vcr.request import Request
 
 from hotglue_smoke_test.artifacts import (
     output_path,
@@ -248,11 +249,21 @@ def _check_filter_response_headers(tmp: Path) -> None:
     assert "Set-Cookie" not in custom["headers"]
     assert custom["headers"]["Content-Type"] == ["application/json"]
 
-    # vcr_use_cassette wires before_record_response onto the cassette.
+    # vcr_use_cassette wires before_record_response; append exercises the hook.
     cassette_path = tmp / "fixtures" / "vcr.yaml"
     cassette_path.parent.mkdir(parents=True, exist_ok=True)
     with runner.vcr_use_cassette([]) as cassette:
-        assert cassette.before_record_response is runner.before_record_response
+        cassette.append(
+            Request(method="GET", uri="https://example.com/", body="", headers={}),
+            {
+                "headers": {
+                    "Set-Cookie": ["session=abc"],
+                    "Content-Type": ["application/json"],
+                }
+            },
+        )
+        assert "Set-Cookie" not in cassette.responses[0]["headers"]
+        assert cassette.responses[0]["headers"]["Content-Type"] == ["application/json"]
 
 
 def _check_sanitize_round_trip(tmp: Path) -> None:
