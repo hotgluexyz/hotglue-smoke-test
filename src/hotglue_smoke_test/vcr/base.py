@@ -18,7 +18,15 @@ from hotglue_smoke_test.vcr.sanitize import (
 
 class VCRBaseTestRunner(ABC):
     FILTER_HEADERS = ["authorization"]
-    FILTER_RESPONSE_HEADERS = ["set-cookie"]
+    FILTER_RESPONSE_HEADERS = [
+        "set-cookie",
+        "www-authenticate",
+        "x-csrf-token",
+        "csrf-token",
+        "x-auth-token",
+        "x-access-token",
+        "x-api-key",
+    ]
     PRESERVE_KEYS: set[str] = set()
     TOKEN_KEYS = [
         "access_token",
