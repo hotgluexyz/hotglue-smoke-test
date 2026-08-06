@@ -17,8 +17,8 @@ from hotglue_smoke_test.vcr.sanitize import (
 
 
 class VCRBaseTestRunner(ABC):
-    FILTER_HEADERS = ["authorization"]
-    FILTER_RESPONSE_HEADERS = [
+    FILTER_HEADERS = [
+        "authorization"
         "set-cookie",
         "www-authenticate",
         "x-csrf-token",
@@ -148,7 +148,7 @@ class VCRBaseTestRunner(ABC):
     def before_record_response(self, response):
         """Drop FILTER_RESPONSE_HEADERS from the response before writing the cassette."""
         headers = response.get("headers") or {}
-        drop = {name.lower() for name in self.FILTER_RESPONSE_HEADERS}
+        drop = {name.lower() for name in self.FILTER_HEADERS}
         for key in list(headers):
             if key.lower() in drop:
                 headers.pop(key, None)
