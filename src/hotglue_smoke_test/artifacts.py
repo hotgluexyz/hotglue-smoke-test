@@ -3,11 +3,32 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
 from hotglue_smoke_test.vcr.base import VCRBaseTestRunner
+
+# ---------------------------------------------------------------------------
+# General
+# ---------------------------------------------------------------------------
+
+
+def _rmtree(path: Path) -> None:
+    if path.is_dir():
+        shutil.rmtree(path)
+
+
+def _die(message: str) -> None:
+    print(f"Error: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+# ---------------------------------------------------------------------------
+# Connector (tap / target)
+# ---------------------------------------------------------------------------
 
 
 def cassette_path(case_dir: Path) -> Path:
@@ -23,11 +44,6 @@ def output_path(case_dir: Path, mode: str, is_target: bool) -> Path:
     raise ValueError(f"record mode has no output file (mode={mode!r})")
 
 
-def _rmtree(path: Path) -> None:
-    if path.is_dir():
-        shutil.rmtree(path)
-
-
 def wipe_record_artifacts(case_dir: Path) -> None:
     for name in ("fixtures", "expected_output", "test_runtime"):
         _rmtree(case_dir / name)
@@ -36,11 +52,6 @@ def wipe_record_artifacts(case_dir: Path) -> None:
 def wipe_generate_artifacts(case_dir: Path) -> None:
     for name in ("expected_output", "test_runtime"):
         _rmtree(case_dir / name)
-
-
-def _die(message: str) -> None:
-    print(f"Error: {message}", file=sys.stderr)
-    raise SystemExit(1)
 
 
 def validate_record(case_dir: Path, force: bool) -> None:
@@ -88,3 +99,138 @@ def validate_run(case_dir: Path, is_target: bool) -> None:
     expected_output = output_path(case_dir, "generate", is_target)
     if not expected_output.is_file():
         _die(f"missing expected output file {expected_output}; run generate first")
+
+
+# ---------------------------------------------------------------------------
+# ETL
+# ---------------------------------------------------------------------------
+
+# UTC job folders: ``YYYYMMDDTHHMMSS`` (not calendar day-only).
+_ETL_DATETIME_DIR_RE = re.compile(r"^\d{8}T\d{6}$")
+
+
+def list_etl_datetime_dirs(case_dir: Path) -> list[Path]:
+    """UTC datetime job folders under an ETL case (``YYYYMMDDTHHMMSS``)."""
+    if not case_dir.is_dir():
+        return []
+    dirs = [
+        p for p in case_dir.iterdir() if p.is_dir() and _ETL_DATETIME_DIR_RE.match(p.name)
+    ]
+    return sorted(dirs, key=lambda p: p.name)
+
+
+def etl_datetime_has_expected(job_dir: Path) -> bool:
+    """True when a UTC job dir already has generate output (``expected_output/etl-output``)."""
+    return (job_dir / "expected_output" / "etl-output").is_dir()
+
+
+def wipe_etl_record_artifacts(case_dir: Path) -> None:
+    """Wipe UTC datetime job dirs; keep test-config.json (record is otherwise append-only)."""
+    for job_dir in list_etl_datetime_dirs(case_dir):
+        _rmtree(job_dir)
+
+
+def wipe_etl_generate_artifacts(case_dir: Path) -> None:
+    for job_dir in list_etl_datetime_dirs(case_dir):
+        _rmtree(job_dir / "expected_output")
+        _rmtree(job_dir / "test_runtime")
+
+
+def validate_etl_record(script_root: Path) -> None:
+    """Require live sync-output under the script root."""
+    sync_src = script_root / "sync-output"
+    if not sync_src.is_dir():
+        _die(
+            f"missing raw sync-output at {sync_src}; put sync-output in the "
+            "script directory before recording"
+        )
+
+
+def validate_no_scrub_case_name(testcase: str) -> None:
+    """--no-scrub may only write under gitignored unsanitized_*_test/ case dirs."""
+    if testcase.startswith("unsanitized_") and testcase.endswith("_test"):
+        return
+    suggested = (
+        f"unsanitized_{testcase}"
+        if testcase.endswith("_test")
+        else f"unsanitized_{testcase}_test"
+    )
+    _die(
+        f"--no-scrub requires a case name matching unsanitized_*_test "
+        f"(got {testcase!r}); rename/use {suggested!r} and add to .gitignore:\n"
+        "**/__smoke-tests__/unsanitized_*_test/"
+    )
+
+
+def validate_no_scrub_gitignored(case_dir: Path) -> None:
+    """Require the case path to be gitignored when a git checkout is available.
+
+    Outside a git repo (or if ``git`` is missing), only warn — name check still applies.
+    Trailing ``/`` makes directory gitignore rules (``…/unsanitized_*_test/``) match
+    even before the case folder exists.
+    """
+    probe = str(case_dir.resolve())
+    if not probe.endswith("/"):
+        probe += "/"
+    try:
+        result = subprocess.run(
+            ["git", "check-ignore", "-q", "--", probe],
+            cwd=str(case_dir.parent),
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        print(
+            "Warning: git not found; cannot verify --no-scrub case is gitignored",
+            file=sys.stderr,
+        )
+        return
+    if result.returncode == 0:
+        return
+    if result.returncode == 1:
+        _die(
+            f"--no-scrub case path is not gitignored: {case_dir}; add to .gitignore:\n"
+            "**/__smoke-tests__/unsanitized_*_test/"
+        )
+    # e.g. 128: not a git repository
+    print(
+        f"Warning: cannot verify gitignore for {case_dir} "
+        f"(git check-ignore exited {result.returncode}); "
+        "ensure the unsanitized case is not committed",
+        file=sys.stderr,
+    )
+
+
+def validate_etl_generate(case_dir: Path, force: bool) -> None:
+    jobs = list_etl_datetime_dirs(case_dir)
+    if not jobs:
+        _die(f"no UTC datetime dirs under {case_dir}; run record first")
+    missing_fixtures = [d.name for d in jobs if not (d / "fixtures").is_dir()]
+    if missing_fixtures:
+        _die(
+            f"missing input fixtures for datetime dirs {missing_fixtures}; "
+            "re-record those datetimes"
+        )
+    if not force and all(etl_datetime_has_expected(d) for d in jobs):
+        _die(
+            f"all datetime dirs under {case_dir} already have expected_output/; "
+            "pass --force to wipe expected_output/ and test_runtime/ per datetime and regenerate"
+        )
+
+
+def validate_etl_run(case_dir: Path) -> None:
+    jobs = list_etl_datetime_dirs(case_dir)
+    if not jobs:
+        _die(f"no UTC datetime dirs under {case_dir}; run record first")
+    missing_fixtures = [d.name for d in jobs if not (d / "fixtures").is_dir()]
+    if missing_fixtures:
+        _die(
+            f"missing input fixtures for datetime dirs {missing_fixtures}; "
+            "re-record those datetimes"
+        )
+    missing = [d.name for d in jobs if not etl_datetime_has_expected(d)]
+    if missing:
+        _die(
+            f"missing expected_output for datetime dirs {missing}; run "
+            f"`hotglue-smoke-test generate {case_dir.name}` first"
+        )

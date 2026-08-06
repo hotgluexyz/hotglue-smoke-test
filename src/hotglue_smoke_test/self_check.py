@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import re
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -10,12 +12,19 @@ from faker import Faker
 
 from hotglue_smoke_test.artifacts import (
     output_path,
+    validate_etl_generate,
+    validate_etl_record,
+    validate_etl_run,
     validate_generate,
+    validate_no_scrub_case_name,
     validate_record,
     validate_run,
+    wipe_etl_generate_artifacts,
+    wipe_etl_record_artifacts,
     wipe_generate_artifacts,
     wipe_record_artifacts,
 )
+from hotglue_smoke_test.cli import _preflight_cases
 from hotglue_smoke_test.vcr.base import VCRBaseTestRunner
 from hotglue_smoke_test.vcr.sanitize import (
     load_cassette,
@@ -24,6 +33,12 @@ from hotglue_smoke_test.vcr.sanitize import (
     scrub_response_body,
     write_cassette,
 )
+from hotglue_smoke_test.compare.csv_output_comparator import compare_csv_folder
+from hotglue_smoke_test.compare.json_output_comparator import JsonOutputComparator
+from hotglue_smoke_test.compare.snapshot_output_comparator import compare_snapshots
+from hotglue_smoke_test.compare.test_configurer import TestConfigurer
+from hotglue_smoke_test.etl.base import ETLSmokeRunner, _snapshot_flow_hint
+from hotglue_smoke_test.etl.scrub import make_deterministic_replace_fn, scrub_file, scrub_series
 
 
 def _assert_raises_system_exit(fn) -> None:
@@ -33,6 +48,118 @@ def _assert_raises_system_exit(fn) -> None:
         assert exc.code != 0
         return
     raise AssertionError("expected SystemExit")
+
+
+def _check_etl_deterministic_scrub() -> None:
+    preserve_values = {"PENDING", "USD"}
+
+    def split_composite(value: str):
+        if "--" in value:
+            return re.split(r"(--)", value)
+        return None
+
+    a = {}
+    b = {}
+    ra = make_deterministic_replace_fn(
+        preserve_values=preserve_values, cache=a, split_composite=split_composite
+    )
+    rb = make_deterministic_replace_fn(
+        preserve_values=preserve_values, cache=b, split_composite=split_composite
+    )
+    assert ra("id", "entity_abc123") == rb("externalId", "entity_abc123")
+    assert ra("status", "PENDING") == "PENDING"
+    # With split: each side through replace; PRESERVE_VALUES keeps USD
+    assert ra("bank_account_id", "entity_abc123--USD") == (
+        f"{ra('id', 'entity_abc123')}--USD"
+    )
+    assert ra("x", "USD--secret_id") == f"USD--{ra('id', 'secret_id')}"
+    # Mixed separators: even indices scrub, odd indices stay literal.
+    mixed = make_deterministic_replace_fn(
+        preserve_values=preserve_values,
+        cache={},
+        split_composite=lambda v: re.split(r"([-_])", v) if re.search(r"[-_]", v) else None,
+    )
+    scrubbed_mixed = mixed("x", "entityabc123-USD_PENDING")
+    assert scrubbed_mixed.endswith("-USD_PENDING")
+    assert not scrubbed_mixed.startswith("entityabc123")
+    # Even-length list means the hook lost a separator; fail loudly.
+    even = make_deterministic_replace_fn(
+        preserve_values=preserve_values, cache={}, split_composite=lambda v: v.split("|")
+    )
+    try:
+        even("x", "a|b")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected ValueError for even-length split_composite")
+    # same process cache reuse
+    assert a[(str, "entity_abc123")] == ra("InputId", "entity_abc123")
+    # without split hook, whole string is one scrub unit
+    plain = make_deterministic_replace_fn(preserve_values=preserve_values, cache={})
+    assert plain("bank_account_id", "entity_abc123--USD") != "entity_abc123--USD"
+    assert not str(plain("bank_account_id", "entity_abc123--USD")).endswith("--USD")
+    # CSV stores datetimes as strings — keep ISO values (parquet Timestamps already kept)
+    iso = "2026-07-03T13:00:00"
+    assert plain("settled_at", iso) == iso
+    assert plain("due_date", "2026-07-15") == "2026-07-15"
+    # Numerics scrub by default; keep via PRESERVE_* when ETL needs them.
+    assert plain("amount", 12.5) != 12.5
+    assert plain("paid", 100) != 100
+
+    # Parquet list/struct cells are unhashable; preserve check must not crash.
+    import numpy as np
+    import pandas as pd
+
+    assert plain("tags", np.array(["secret_a", "PENDING"])) is not None
+    scrubbed = scrub_series(
+        pd.Series([{"email": "real@example.com"}, np.array(["secret_a", "PENDING"])]),
+        "payload",
+        replace_fn=plain,
+        preserve_columns=set(),
+        preserve_values=preserve_values,
+        preserve_keys=set(),
+        token_keys=set(),
+        should_scrub_key=lambda _k: False,
+    )
+    assert scrubbed.iloc[0]["email"] != "real@example.com"
+    # Nested leaf keeps owning key so faker uses email-shaped replacement.
+    assert "@" in scrubbed.iloc[0]["email"]
+    assert scrubbed.iloc[1][1] == "PENDING"
+    assert scrubbed.iloc[1][0] != "secret_a"
+
+    # CSV: do not turn empty/NA into NaN or coerce "001" to int before scrub.
+    csv_path = Path(tempfile.mkdtemp()) / "sample.csv"
+    csv_path.write_text("code,empty,marker,secret\n001,,NA,live-token\n")
+    scrub_file(
+        csv_path,
+        replace_fn=plain,
+        preserve_columns={"empty", "marker"},
+        preserve_values=preserve_values,
+        preserve_keys=set(),
+        token_keys=set(),
+        should_scrub_key=lambda _k: False,
+    )
+    cells = csv_path.read_text().strip().splitlines()[1].split(",")
+    assert cells[0] != "001"
+    assert cells[1] == ""
+    assert cells[2] == "NA"
+    assert cells[3] != "live-token"
+
+
+def _check_etl_compare_noops(tmp: Path) -> None:
+    """JSON/CSV compare no-op when etl-output has no json/csv (Singer-only cases)."""
+    tmp.mkdir(parents=True, exist_ok=True)
+    cfg = TestConfigurer.get_test_config(str(tmp))
+    assert "dtypes_config" in cfg
+    expected = tmp / "expected"
+    actual = tmp / "actual"
+    expected.mkdir()
+    actual.mkdir()
+    (expected / "data.singer").write_text("{}\n")
+    (actual / "data.singer").write_text("{}\n")
+    JsonOutputComparator("noop", str(expected), str(actual), cfg).compare()
+    compare_csv_folder("noop", str(actual), str(expected), {"test_config": cfg})
+    compare_snapshots(tmp / "missing_snaps", tmp / "missing_snaps", label="noop", test_config=cfg)
 
 
 def _swallow_success_system_exit(fn) -> None:
@@ -284,8 +411,141 @@ def main() -> None:
         assert not (case / "expected_output").exists()
         assert not (case / "test_runtime").exists()
 
+        validate_no_scrub_case_name("unsanitized_internal_server_error_retry_test")
+        validate_no_scrub_case_name("unsanitized_read_test")
+        _assert_raises_system_exit(
+            lambda: validate_no_scrub_case_name("orders_test")
+        )
+        _assert_raises_system_exit(
+            lambda: validate_no_scrub_case_name("read_test")
+        )
+        _assert_raises_system_exit(
+            lambda: _preflight_cases(
+                "record",
+                ["orders_test"],
+                Path(tmp) / "tap-demo" / "__smoke-tests__",
+                Path(tmp) / "tap-demo",
+                False,
+                False,
+                False,
+                no_scrub=True,
+            )
+        )
+
+        tap_root = Path(tmp) / "tap-demo"
+        tap_smoke = tap_root / "__smoke-tests__"
+        tap_case = tap_smoke / "orders_test"
+        tap_case.mkdir(parents=True)
+        _assert_raises_system_exit(
+            lambda: _preflight_cases(
+                "run", ["orders_test"], tap_smoke, tap_root, False, False, False
+            )
+        )
+        (tap_case / "fixtures").mkdir()
+        (tap_case / "fixtures" / "vcr.yaml").write_text("cassette\n")
+        _assert_raises_system_exit(
+            lambda: _preflight_cases(
+                "run", ["orders_test"], tap_smoke, tap_root, False, False, False
+            )
+        )
+        (tap_case / "expected_output").mkdir()
+        (tap_case / "expected_output" / "data.singer").write_text("{}\n")
+        _preflight_cases(
+            "run", ["orders_test"], tap_smoke, tap_root, False, False, False
+        )
+
+        etl_root = Path(tmp) / "etl-demo"
+        etl_root.mkdir()
+        (etl_root / "__smoke-tests__").mkdir()
+        _assert_raises_system_exit(lambda: validate_etl_record(etl_root))
+        _assert_raises_system_exit(
+            lambda: _preflight_cases(
+                "record",
+                ["read_test"],
+                etl_root / "__smoke-tests__",
+                etl_root,
+                False,
+                True,
+                False,
+            )
+        )
+        (etl_root / "sync-output").mkdir()
+        validate_etl_record(etl_root)
+        _preflight_cases(
+            "record",
+            ["read_test"],
+            etl_root / "__smoke-tests__",
+            etl_root,
+            False,
+            True,
+            False,
+        )
+        etl_case_dir = etl_root / "__smoke-tests__" / "read_test"
+        etl_case_dir.mkdir()
+        day = etl_case_dir / "20260803T194829"
+        day.mkdir()
+        (day / "fixtures").mkdir()
+        _assert_raises_system_exit(
+            lambda: _preflight_cases(
+                "run",
+                ["read_test"],
+                etl_root / "__smoke-tests__",
+                etl_root,
+                False,
+                True,
+                False,
+            )
+        )
+
+        etl_case = Path(tmp) / "bank_transactions_test"
+        etl_case.mkdir()
+        (etl_case / "test-config.json").write_text('{"flow": "x"}\n')
+        etl_runner = ETLSmokeRunner("bank_transactions_test", Path(tmp))
+        assert etl_runner._case_env() == {"FLOW": "x"}
+        (etl_case / "test-config.json").unlink()
+        assert etl_runner._case_env() == {}
+        snapshots = etl_case / "snapshots"
+        snapshots.mkdir()
+        (snapshots / "contacts_Alv3Avor0.snapshot.csv").touch()
+        assert _snapshot_flow_hint(snapshots) == "contacts_Alv3Avor0.snapshot.csv"
+        (etl_case / "test-config.json").write_text('{"flow": "x"}\n')
+        day1 = etl_case / "20260701T120000"
+        day1.mkdir()
+        (day1 / "fixtures").mkdir()
+        (day1 / "expected_output" / "etl-output").mkdir(parents=True)
+        (day1 / "test_runtime").mkdir()
+        _assert_raises_system_exit(lambda: validate_etl_generate(etl_case, force=False))
+        validate_etl_run(etl_case)
+        shutil.rmtree(day1 / "fixtures")
+        _assert_raises_system_exit(lambda: validate_etl_run(etl_case))
+        _assert_raises_system_exit(lambda: validate_etl_generate(etl_case, force=True))
+        (day1 / "fixtures").mkdir()
+        validate_etl_run(etl_case)
+        wipe_etl_generate_artifacts(etl_case)
+        assert (day1 / "fixtures").is_dir()
+        assert not (day1 / "expected_output").exists()
+        assert not (day1 / "test_runtime").exists()
+        _assert_raises_system_exit(lambda: validate_etl_run(etl_case))
+        wipe_etl_record_artifacts(etl_case)
+        assert not day1.exists()
+        assert (etl_case / "test-config.json").is_file()
+        _assert_raises_system_exit(lambda: validate_etl_generate(etl_case, force=False))
+
+        mapping_root = Path(tmp) / "mapping-etl"
+        mapping_fixtures = mapping_root / "__smoke-tests__" / "read_test" / "fixtures"
+        mapping_fixtures.mkdir(parents=True)
+        (mapping_root / "mapping.json").write_text('{"source": true}\n')
+        (mapping_fixtures / "mapping.json").write_text('{"fixture": true}\n')
+        mapping_runtime = mapping_root / "test_runtime"
+        ETLSmokeRunner(
+            "read_test", mapping_root / "__smoke-tests__"
+        )._prepare_runtime_from_fixtures(mapping_fixtures, mapping_runtime)
+        assert (mapping_runtime / "mapping.json").read_text() == '{"source": true}\n'
+
         _check_sanitize_round_trip(Path(tmp) / "sanitize_check")
         _check_filter_response_headers(Path(tmp) / "filter_response_headers")
+        _check_etl_deterministic_scrub()
+        _check_etl_compare_noops(Path(tmp) / "etl_compare_noop")
 
         def _exit(code):
             raise SystemExit(code)

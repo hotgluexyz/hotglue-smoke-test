@@ -12,13 +12,20 @@ from pathlib import Path
 import pytest
 
 from hotglue_smoke_test.artifacts import (
+    validate_etl_generate,
+    validate_etl_record,
+    validate_etl_run,
     validate_generate,
+    validate_no_scrub_case_name,
+    validate_no_scrub_gitignored,
     validate_record,
     validate_run,
+    wipe_etl_generate_artifacts,
+    wipe_etl_record_artifacts,
     wipe_generate_artifacts,
     wipe_record_artifacts,
 )
-from hotglue_smoke_test.drivers import tap_driver, target_driver
+from hotglue_smoke_test.drivers import etl_driver, tap_driver, target_driver
 
 
 def _print_section(title: str) -> None:
@@ -32,17 +39,26 @@ def _print_status(status: str, message: str) -> None:
     print(f"[{timestamp}] {status}: {message}")
 
 
+def _is_etl(tests_dir: Path) -> bool:
+    return (tests_dir / "record-etl.py").is_file()
+
+
+def _is_target_repo(connector_dir: Path) -> bool:
+    """Detect target repos from directory name (`target-*`)."""
+    return connector_dir.name.startswith("target-")
+
+
 def _resolve_tests_dir(connector_dir: Path) -> Path:
     tests_dir = connector_dir / "__smoke-tests__"
     record_vcr = tests_dir / "record-vcr.py"
-    if not record_vcr.is_file():
+    record_etl = tests_dir / "record-etl.py"
+    if not record_vcr.is_file() and not record_etl.is_file():
         print(
-            f"Error: colocated tests require {record_vcr}",
+            f"Error: colocated tests require {record_vcr} or {record_etl}",
             file=sys.stderr,
         )
         sys.exit(1)
     return tests_dir
-
 
 def _discover_cases(test_dir: Path, case_name: str) -> list[str]:
     if case_name == "*":
@@ -61,54 +77,110 @@ def _discover_cases(test_dir: Path, case_name: str) -> list[str]:
     return [case_name]
 
 
-def _run_record_vcr(
+def _run_colocated_script(
+    script: Path,
     connector_dir: Path,
-    tests_dir: Path,
     testcase: str,
     mode: str,
+    *,
+    force: bool = False,
     no_scrub: bool = False,
 ) -> None:
-    record_vcr = tests_dir / "record-vcr.py"
+    """Shell out to record-vcr.py / record-etl.py with SMOKE_TEST_* env."""
     env = os.environ.copy()
     env["PYTHONPATH"] = str(connector_dir)
     env["SMOKE_TEST_MODE"] = mode
+    if force:
+        env["SMOKE_TEST_FORCE"] = "1"
+    else:
+        env.pop("SMOKE_TEST_FORCE", None)
     if no_scrub:
         env["SMOKE_TEST_NO_SCRUB"] = "1"
     else:
         env.pop("SMOKE_TEST_NO_SCRUB", None)
+    force_flag = env.get("SMOKE_TEST_FORCE", "")
     print(
-        f"command [SMOKE_TEST_MODE={mode} PYTHONPATH={env['PYTHONPATH']} "
-        f"python {record_vcr} {testcase}]"
+        f"command [SMOKE_TEST_MODE={mode} SMOKE_TEST_FORCE={force_flag} "
+        f"PYTHONPATH={env['PYTHONPATH']} python {script} {testcase}]"
     )
-    subprocess.run([sys.executable, str(record_vcr), testcase], env=env, check=True)
+    subprocess.run([sys.executable, str(script), testcase], env=env, check=True)
 
 
-def _run_comparison(smoke_test_dir: Path, case_name: str, is_target: bool) -> None:
+def _run_comparison(
+    smoke_test_dir: Path,
+    case_name: str,
+    is_target: bool,
+    *,
+    is_etl: bool = False,
+) -> None:
     os.environ["SMOKE_TEST_DIR"] = str(smoke_test_dir)
     os.environ["CASE_NAME"] = case_name
 
-    driver = target_driver if is_target else tap_driver
+    if is_etl:
+        driver = etl_driver
+    else:
+        driver = target_driver if is_target else tap_driver
     exit_code = pytest.main(["-s", driver.__file__])
     if exit_code != 0:
         raise subprocess.CalledProcessError(exit_code, "pytest")
 
 
+def _preflight_cases(
+    mode: str,
+    cases: list[str],
+    smoke_test_dir: Path,
+    connector_dir: Path,
+    is_target: bool,
+    is_etl: bool,
+    force: bool,
+    no_scrub: bool = False,
+) -> None:
+    """Validate all selected cases before any banners or mutations."""
+    if mode == "record" and no_scrub:
+        for testcase in cases:
+            validate_no_scrub_case_name(testcase)
+            validate_no_scrub_gitignored(smoke_test_dir / testcase)
+    if is_etl:
+        if mode == "record":
+            validate_etl_record(connector_dir)
+            return
+        for testcase in cases:
+            case_dir = smoke_test_dir / testcase
+            if mode == "generate":
+                validate_etl_generate(case_dir, force)
+            elif mode == "run":
+                validate_etl_run(case_dir)
+        return
+    for testcase in cases:
+        case_dir = smoke_test_dir / testcase
+        if mode == "record":
+            validate_record(case_dir, force)
+        elif mode == "generate":
+            validate_generate(case_dir, is_target, force)
+        elif mode == "run":
+            validate_run(case_dir, is_target)
+
+
 def _prepare_case(
     mode: str,
     case_dir: Path,
-    is_target: bool,
     force: bool,
+    *,
+    is_etl: bool = False,
 ) -> None:
+    """Force-only wipes; validation runs in ``_preflight_cases``."""
+    if not force:
+        return
+    if is_etl:
+        if mode == "record":
+            wipe_etl_record_artifacts(case_dir)
+        elif mode == "generate":
+            wipe_etl_generate_artifacts(case_dir)
+        return
     if mode == "record":
-        validate_record(case_dir, force)
-        if force:
-            wipe_record_artifacts(case_dir)
+        wipe_record_artifacts(case_dir)
     elif mode == "generate":
-        validate_generate(case_dir, is_target, force)
-        if force:
-            wipe_generate_artifacts(case_dir)
-    elif mode == "run":
-        validate_run(case_dir, is_target)
+        wipe_generate_artifacts(case_dir)
 
 
 def _execute_case(
@@ -118,31 +190,41 @@ def _execute_case(
     connector_dir: Path,
     smoke_test_dir: Path,
     is_target: bool,
+    is_etl: bool,
     force: bool,
     no_scrub: bool = False,
 ) -> None:
     case_dir = smoke_test_dir / testcase
-    _prepare_case(mode, case_dir, is_target, force)
+    _prepare_case(mode, case_dir, force, is_etl=is_etl)
 
-    label = {
-        "record": "Recording vcr",
-        "generate": "Generating data.singer/state.json",
-        "run": "Running comparison",
-    }[mode]
+    if is_etl:
+        label = {
+            "record": "Recording ETL fixtures",
+            "generate": "Generating ETL expected_output",
+            "run": "Running ETL comparison",
+        }[mode]
+    else:
+        label = {
+            "record": "Recording vcr",
+            "generate": "Generating data.singer/state.json",
+            "run": "Running comparison",
+        }[mode]
     _print_section(f"{label}: {connector_name} / {testcase}")
     _print_status("INFO", f"Starting at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-    _run_record_vcr(
+    script = smoke_test_dir / ("record-etl.py" if is_etl else "record-vcr.py")
+    _run_colocated_script(
+        script,
         connector_dir,
-        smoke_test_dir,
         testcase,
         mode,
+        force=force if is_etl else False,
         no_scrub=no_scrub,
     )
 
     if mode == "run":
         _print_status("INFO", f"Running comparison for case {testcase}")
-        _run_comparison(smoke_test_dir, testcase, is_target)
+        _run_comparison(smoke_test_dir, testcase, is_target, is_etl=is_etl)
 
 
 def _run_command(args: argparse.Namespace) -> int:
@@ -152,16 +234,33 @@ def _run_command(args: argparse.Namespace) -> int:
     connector_dir = Path(args.connector_directory).resolve()
     smoke_test_dir = _resolve_tests_dir(connector_dir)
     connector_name = connector_dir.name.removeprefix("tap-").removeprefix("target-")
+    is_target = _is_target_repo(connector_dir)
+    is_etl = _is_etl(smoke_test_dir)
+    cases = _discover_cases(smoke_test_dir, args.case_name)
+    _preflight_cases(
+        mode,
+        cases,
+        smoke_test_dir,
+        connector_dir,
+        is_target,
+        is_etl,
+        args.force,
+        no_scrub=args.no_scrub,
+    )
 
     _print_section("Test Configuration")
     _print_status("INFO", f"Mode: {mode}")
     _print_status("INFO", f"Connector Name: {connector_name}")
     _print_status("INFO", f"Case Name: {args.case_name}")
-    _print_status("INFO", f"Target Mode: {args.target}")
+    if is_etl:
+        kind = "etl"
+    elif is_target:
+        kind = "target"
+    else:
+        kind = "tap"
+    _print_status("INFO", f"Kind: {kind}")
     _print_status("INFO", f"Connector Directory: {connector_dir}")
     _print_status("INFO", f"Test Directory: {smoke_test_dir}")
-
-    cases = _discover_cases(smoke_test_dir, args.case_name)
 
     _print_section("Starting Execution")
     if args.case_name == "*":
@@ -178,7 +277,8 @@ def _run_command(args: argparse.Namespace) -> int:
                 testcase,
                 connector_dir,
                 smoke_test_dir,
-                args.target,
+                is_target,
+                is_etl,
                 args.force,
                 no_scrub=args.no_scrub,
             )
@@ -216,7 +316,6 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         default=".",
         help="Path to connector repo root (default: current directory)",
     )
-    parser.add_argument("--target", action="store_true", help="Run as target")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -236,7 +335,12 @@ def build_parser() -> argparse.ArgumentParser:
     record_parser.add_argument(
         "--no-scrub",
         action="store_true",
-        help="Skip post-record scrub (debug only; do not commit unsanitized cassettes)",
+        help=(
+            "Skip post-record scrub (debug only). Case must be named "
+            "unsanitized_*_test. When run inside a git checkout, the case "
+            "path must be gitignored; otherwise that check is skipped and "
+            "keeping the case out of version control is an operator duty"
+        ),
     )
     record_parser.set_defaults(func=_run_command, mode="record", force=False, no_scrub=False)
 
