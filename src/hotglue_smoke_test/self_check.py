@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 
 from faker import Faker
+from vcr.request import Request
 
 from hotglue_smoke_test.artifacts import (
     output_path,
@@ -169,6 +170,100 @@ def _swallow_success_system_exit(fn) -> None:
     except SystemExit as exc:
         if exc.code not in (0, None):
             raise
+
+
+class _StubVCRRunner(VCRBaseTestRunner):
+    """Minimal concrete runner for unit checks (no launch)."""
+
+    required_files = []
+
+    @property
+    def output_basename(self) -> str:
+        return "data.singer"
+
+    def module(self) -> str:
+        return "stub"
+
+    def run_launch(self):
+        pass
+
+    def launch(self):
+        pass
+
+    def argv(self) -> list[str]:
+        return []
+
+
+def _check_filter_response_headers(tmp: Path) -> None:
+    runner = _StubVCRRunner("case_test", str(tmp))
+
+    response = {
+        "status": {"code": 200, "message": "OK"},
+        "headers": {
+            "Set-Cookie": ["session=abc; Path=/"],
+            "WWW-Authenticate": ["Basic realm=test"],
+            "X-CSRF-Token": ["csrf-value"],
+            "Content-Type": ["application/json"],
+            "X-Request-Id": ["keep-me"],
+        },
+        "body": {"string": "{}"},
+    }
+    out = runner.before_record_response(response)
+    headers = out["headers"]
+    assert "Set-Cookie" not in headers
+    assert "WWW-Authenticate" not in headers
+    assert "X-CSRF-Token" not in headers
+    assert headers["Content-Type"] == ["application/json"]
+    assert headers["X-Request-Id"] == ["keep-me"]
+    assert out["body"] == {"string": "{}"}
+
+    # Matching is case-insensitive on both the allowlist and recorded keys.
+    mixed = runner.before_record_response(
+        {"headers": {"set-cookie": ["a=b"], "x-api-key": ["k"], "Accept": ["*/*"]}}
+    )
+    assert "set-cookie" not in mixed["headers"]
+    assert "x-api-key" not in mixed["headers"]
+    assert mixed["headers"]["Accept"] == ["*/*"]
+
+    assert runner.before_record_response({}) == {}
+    assert runner.before_record_response({"headers": None}) == {"headers": None}
+    assert runner.before_record_response({"headers": {}}) == {"headers": {}}
+
+    class _Extended(_StubVCRRunner):
+        FILTER_HEADERS = [
+            *VCRBaseTestRunner.FILTER_HEADERS,
+            "X-Custom-Secret",
+        ]
+
+    extended = _Extended("case_test", str(tmp))
+    custom = extended.before_record_response(
+        {
+            "headers": {
+                "X-Custom-Secret": ["s3cret"],
+                "Set-Cookie": ["session=abc"],
+                "Content-Type": ["application/json"],
+            }
+        }
+    )
+    assert "X-Custom-Secret" not in custom["headers"]
+    assert "Set-Cookie" not in custom["headers"]
+    assert custom["headers"]["Content-Type"] == ["application/json"]
+
+    # vcr_use_cassette wires before_record_response; append exercises the hook.
+    cassette_path = tmp / "fixtures" / "vcr.yaml"
+    cassette_path.parent.mkdir(parents=True, exist_ok=True)
+    with runner.vcr_use_cassette([]) as cassette:
+        cassette.append(
+            Request(method="GET", uri="https://example.com/", body="", headers={}),
+            {
+                "headers": {
+                    "Set-Cookie": ["session=abc"],
+                    "Content-Type": ["application/json"],
+                }
+            },
+        )
+        assert "Set-Cookie" not in cassette.responses[0]["headers"]
+        assert cassette.responses[0]["headers"]["Content-Type"] == ["application/json"]
 
 
 def _check_sanitize_round_trip(tmp: Path) -> None:
@@ -459,6 +554,7 @@ def main() -> None:
         assert (mapping_runtime / "mapping.json").read_text() == '{"source": true}\n'
 
         _check_sanitize_round_trip(Path(tmp) / "sanitize_check")
+        _check_filter_response_headers(Path(tmp) / "filter_response_headers")
         _check_etl_deterministic_scrub()
         _check_etl_compare_noops(Path(tmp) / "etl_compare_noop")
 

@@ -17,7 +17,16 @@ from hotglue_smoke_test.vcr.sanitize import (
 
 
 class VCRBaseTestRunner(ABC):
-    FILTER_HEADERS = ["authorization"]
+    FILTER_HEADERS = [
+        "authorization",
+        "set-cookie",
+        "www-authenticate",
+        "x-csrf-token",
+        "csrf-token",
+        "x-auth-token",
+        "x-access-token",
+        "x-api-key",
+    ]
     PRESERVE_KEYS: set[str] = set()
     TOKEN_KEYS = [
         "access_token",
@@ -136,6 +145,15 @@ class VCRBaseTestRunner(ABC):
             ),
         )
 
+    def before_record_response(self, response):
+        """Drop FILTER_HEADERS from the response before writing the cassette."""
+        headers = response.get("headers") or {}
+        drop = {name.lower() for name in self.FILTER_HEADERS}
+        for key in list(headers):
+            if key.lower() in drop:
+                headers.pop(key, None)
+        return response
+
     def vcr_use_cassette(self, filter_query_parameters):
         return vcr.use_cassette(
             self.vcr_cassette_path,
@@ -143,6 +161,7 @@ class VCRBaseTestRunner(ABC):
             filter_headers=list(self.FILTER_HEADERS),
             filter_post_data_parameters=list(self.TOKEN_KEYS),
             filter_query_parameters=filter_query_parameters,
+            before_record_response=self.before_record_response,
         )
 
     @abstractmethod
