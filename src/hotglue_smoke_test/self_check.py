@@ -230,8 +230,8 @@ def _check_filter_response_headers(tmp: Path) -> None:
     assert runner.before_record_response({"headers": {}}) == {"headers": {}}
 
     class _Extended(_StubVCRRunner):
-        FILTER_RESPONSE_HEADERS = [
-            *VCRBaseTestRunner.FILTER_RESPONSE_HEADERS,
+        FILTER_HEADERS = [
+            *VCRBaseTestRunner.FILTER_HEADERS,
             "X-Custom-Secret",
         ]
 

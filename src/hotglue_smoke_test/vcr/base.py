@@ -146,7 +146,7 @@ class VCRBaseTestRunner(ABC):
         )
 
     def before_record_response(self, response):
-        """Drop FILTER_RESPONSE_HEADERS from the response before writing the cassette."""
+        """Drop FILTER_HEADERS from the response before writing the cassette."""
         headers = response.get("headers") or {}
         drop = {name.lower() for name in self.FILTER_HEADERS}
         for key in list(headers):
