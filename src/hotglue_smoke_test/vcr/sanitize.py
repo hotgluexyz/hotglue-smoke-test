@@ -184,6 +184,9 @@ def make_faker_replace_fn(faker, cache: dict) -> Callable[[str, Any], Any]:
     def replace(key: str, value: Any) -> Any:
         if value is None:
             return None
+        # "" and whitespace-only strings are preserved
+        if isinstance(value, str) and not value.strip():
+            return value
         try:
             raw_key = tuple(value) if isinstance(value, list) else value
             hash(raw_key)
@@ -234,11 +237,8 @@ def make_faker_replace_fn(faker, cache: dict) -> Callable[[str, Any], Any]:
         elif isinstance(value, list):
             fake = [replace(key, item) for item in value]
         elif isinstance(value, str):
-            # "" and whitespace-only
-            if not value.strip():
-                fake = value
             #integer
-            elif re.fullmatch(r"-?\d+", value.strip()):
+            if re.fullmatch(r"-?\d+", value.strip()):
                 fake = str(faker.random_int())
             #float
             elif re.fullmatch(r"-?\d+\.\d+", value.strip()):

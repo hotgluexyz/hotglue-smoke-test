@@ -218,7 +218,7 @@ class ETLSmokeRunner(ABC):
         snap_dest = runtime / "snapshots"
         if snap_dest.exists():
             shutil.rmtree(snap_dest)
-        shutil.copytree(previous, snap_dest)
+        shutil.copytree(previous, snap_dest, ignore=shutil.ignore_patterns(".gitkeep"))
         print(f"Snapshot chained: '{previous}' -> '{snap_dest}'")
 
     def _run_etl(self, root_dir: Path, today: str) -> None:
