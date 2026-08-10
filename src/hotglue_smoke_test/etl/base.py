@@ -295,10 +295,14 @@ class ETLSmokeRunner(ABC):
             expected.mkdir(parents=True)
             etl_out = runtime / "etl-output"
             if etl_out.is_dir():
-                shutil.copytree(etl_out, expected / "etl-output")
+                dest = expected / "etl-output"
+                shutil.copytree(etl_out, dest)
+                _gitkeep_if_empty(dest)
             snap_out = runtime / "snapshots"
             if snap_out.is_dir():
-                shutil.copytree(snap_out, expected / "snapshots")
+                dest = expected / "snapshots"
+                shutil.copytree(snap_out, dest)
+                _gitkeep_if_empty(dest)
 
             previous_snapshots = snap_out
             print(f"Wrote {expected}")
@@ -428,3 +432,9 @@ def _expected_dir(job_dir: Path) -> Path:
 
 def _runtime_dir(job_dir: Path) -> Path:
     return job_dir / "test_runtime"
+
+
+def _gitkeep_if_empty(directory: Path) -> None:
+    """Git does not track empty dirs; snapshot-only ETL may leave etl-output/ empty."""
+    if directory.is_dir() and not any(directory.iterdir()):
+        (directory / ".gitkeep").touch()
