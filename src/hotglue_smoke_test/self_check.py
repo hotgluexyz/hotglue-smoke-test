@@ -105,7 +105,22 @@ def _check_etl_deterministic_scrub() -> None:
     assert plain("due_date", "2026-07-15") == "2026-07-15"
     # Numerics scrub by default; keep via PRESERVE_* when ETL needs them.
     assert plain("amount", 12.5) != 12.5
+    assert isinstance(plain("amount", 12.5), float)
     assert plain("paid", 100) != 100
+    assert isinstance(plain("paid", 100), int)
+    # CSV numeric strings stay str but scrub to parseable digit strings.
+    amount_str = plain("amount", "1000")
+    assert isinstance(amount_str, str)
+    assert amount_str != "1000"
+    assert not amount_str.startswith("-Fallback-scrubbed-")
+    int(amount_str)
+    rate_str = plain("rate", "12.5")
+    assert isinstance(rate_str, str)
+    assert rate_str != "12.5"
+    assert not rate_str.startswith("-Fallback-scrubbed-")
+    float(rate_str)
+    assert plain("label", "Acme Corp").startswith("-Fallback-scrubbed-")
+    assert plain("empty", "") == ""
 
     # Parquet list/struct cells are unhashable; preserve check must not crash.
     import numpy as np
@@ -127,6 +142,42 @@ def _check_etl_deterministic_scrub() -> None:
     assert "@" in scrubbed.iloc[0]["email"]
     assert scrubbed.iloc[1][1] == "PENDING"
     assert scrubbed.iloc[1][0] != "secret_a"
+
+    # target-csv stores nested cells as Python repr; scrub nested PII via PRESERVE_KEYS.
+    cell = (
+        "[{'id': 64935, 'start_date': None, "
+        "'subcontractor': {'id': 412017, 'contact_email': 'lwitt@prmech.com'}}]"
+    )
+    out = scrub_series(
+        pd.Series([cell]),
+        "insurance_requests",
+        replace_fn=plain,
+        preserve_columns=set(),
+        preserve_values=preserve_values,
+        preserve_keys={"id", "start_date"},
+        token_keys=set(),
+        should_scrub_key=lambda _k: False,
+    ).iloc[0]
+    parsed = json.loads(out)
+    assert parsed[0]["id"] == 64935
+    assert parsed[0]["subcontractor"]["id"] == 412017
+    assert parsed[0]["start_date"] is None
+    assert parsed[0]["subcontractor"]["contact_email"] != "lwitt@prmech.com"
+
+    # Invalid bracket-prefixed string falls back to scalar scrub (no crash).
+    invalid = "[not a valid literal"
+    invalid_out = scrub_series(
+        pd.Series([invalid]),
+        "notes",
+        replace_fn=plain,
+        preserve_columns=set(),
+        preserve_values=preserve_values,
+        preserve_keys=set(),
+        token_keys=set(),
+        should_scrub_key=lambda _k: False,
+    ).iloc[0]
+    assert invalid_out != invalid
+    assert invalid_out.startswith("-Fallback-scrubbed-")
 
     # CSV: do not turn empty/NA into NaN or coerce "001" to int before scrub.
     csv_path = Path(tempfile.mkdtemp()) / "sample.csv"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import datetime
 import hashlib
 import json
@@ -175,7 +176,12 @@ def _maybe_json_loads(value: Any) -> Any:
     try:
         return json.loads(text)
     except json.JSONDecodeError:
+        pass
+    try:
+        obj = ast.literal_eval(text)
+    except (SyntaxError, ValueError):
         return value
+    return obj if isinstance(obj, (dict, list)) else value
 
 
 def scrub_series(

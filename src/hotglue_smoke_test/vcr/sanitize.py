@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Callable
 
@@ -232,8 +233,21 @@ def make_faker_replace_fn(faker, cache: dict) -> Callable[[str, Any], Any]:
             fake = float(faker.pyfloat())
         elif isinstance(value, list):
             fake = [replace(key, item) for item in value]
-        else: # isinstance(value, str):
-            fake = f"-Fallback-scrubbed-{faker.pystr(min_chars=len(value), max_chars=len(value))}"
+        elif isinstance(value, str):
+            # "" and whitespace-only
+            if not value.strip():
+                fake = value
+            #integer
+            elif re.fullmatch(r"-?\d+", value.strip()):
+                fake = str(faker.random_int())
+            #float
+            elif re.fullmatch(r"-?\d+\.\d+", value.strip()):
+                fake = str(float(faker.pyfloat()))
+            else:
+                fake = f"-Fallback-scrubbed-{faker.pystr(min_chars=len(value), max_chars=len(value))}"
+        else:
+            text = str(value)
+            fake = f"-Fallback-scrubbed-{faker.pystr(min_chars=len(text), max_chars=len(text))}"
 
         if cache_key is not None:
             cache[cache_key] = fake
