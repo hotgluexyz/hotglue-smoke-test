@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import datetime
 import hashlib
 import json
@@ -166,7 +167,12 @@ def scrub_json(
     return replace_fn(key, obj)
 
 
-def _maybe_json_loads(value: Any) -> Any:
+def _maybe_parse_nested_cell(value: Any) -> Any:
+    """
+    Parse nested cell value;
+    Try JSON first;
+    Fall back to ast.literal_eval (same approach as gluestick's parse_objs());
+    """
     if not isinstance(value, str):
         return value
     text = value.strip()
@@ -175,7 +181,12 @@ def _maybe_json_loads(value: Any) -> Any:
     try:
         return json.loads(text)
     except json.JSONDecodeError:
+        pass
+    try:
+        obj = ast.literal_eval(text)
+    except (SyntaxError, ValueError):
         return value
+    return obj if isinstance(obj, (dict, list)) else value
 
 
 def scrub_series(
@@ -197,7 +208,7 @@ def scrub_series(
             return value
         if _is_preserved(value, preserve_values):
             return value
-        parsed = _maybe_json_loads(value)
+        parsed = _maybe_parse_nested_cell(value)
         if hasattr(parsed, "tolist") and not isinstance(parsed, (str, bytes)):
             parsed = parsed.tolist()
         if isinstance(parsed, (dict, list)):
