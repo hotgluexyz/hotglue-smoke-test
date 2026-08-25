@@ -8,6 +8,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
+import xmltodict
 from faker import Faker
 from vcr.request import Request
 
@@ -29,8 +30,10 @@ from hotglue_smoke_test.cli import _preflight_cases
 from hotglue_smoke_test.vcr.base import VCRBaseTestRunner
 from hotglue_smoke_test.vcr.sanitize import (
     load_cassette,
+    make_faker_replace_fn,
     sanitize_cassette_file,
     sanitize_config_credentials,
+    scrub_request_body,
     scrub_response_body,
     write_cassette,
 )
@@ -409,6 +412,34 @@ def _check_sanitize_round_trip(tmp: Path) -> None:
     assert dotted_data["BILLTO.FIRSTNAME"] != "Ada"
     assert dotted_data["BILLTO.FIRSTNAME"].isalpha()
 
+    # XML-ish numeric/bool strings must stay coercible (not Fallback)
+    Faker.seed(31)
+    plain_vcr = make_faker_replace_fn(Faker(), {})
+    for sample in (".03", "5.", "12.5"):
+        out = plain_vcr("AMOUNT", sample)
+        assert isinstance(out, str) and out != sample
+        assert not out.startswith("-Fallback-scrubbed-")
+        float(out)
+    for sample in ("true", "false", "TRUE", "False"):
+        out = plain_vcr("billable", sample)
+        assert isinstance(out, str)
+        assert out in ("true", "false")
+    # date / date-time strings stay parseable (not Fallback)
+    from dateutil.parser import parse as parse_dt
+
+    for sample, pattern in (
+        ("06/24/2026", r"\d{2}/\d{2}/\d{4}"),
+        ("06/24/2026 14:57:36", r"\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}"),
+        ("2026-07-15", r"\d{4}-\d{2}-\d{2}"),
+        ("2026-07-03 13:00:00", r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}"),
+        ("2026-08-25T19:32:25+00:00", r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+00:00"),
+    ):
+        out = plain_vcr("WHENCREATED", sample)
+        assert isinstance(out, str) and out != sample
+        assert not out.startswith("-Fallback-scrubbed-")
+        assert re.fullmatch(pattern, out), (sample, out)
+        parse_dt(out)
+
     # array-rooted responses must still redact TOKEN_KEYS (not skip / preserve live)
     Faker.seed(13)
     arr = json.loads(
@@ -428,7 +459,107 @@ def _check_sanitize_round_trip(tmp: Path) -> None:
     except NotImplementedError:
         pass
     else:
-        raise AssertionError("expected NotImplementedError for non-JSON body")
+        raise AssertionError("expected NotImplementedError for non-JSON/non-XML body")
+
+    session_xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        "<response><operation><result><data><api>"
+        "<sessionid>LiveSessionIdABC123</sessionid>"
+        "<endpoint>https://api.intacct.com/ia/xml/xmlgw.phtml</endpoint>"
+        "</api></data></result></operation></response>"
+    )
+    Faker.seed(21)
+    scrubbed_session = xmltodict.parse(
+        scrub_response_body(session_xml, set(), Faker(), {}, token_keys)
+    )
+    api = scrubbed_session["response"]["operation"]["result"]["data"]["api"]
+    assert api["sessionid"] != "LiveSessionIdABC123"
+    assert api["endpoint"] != "https://api.intacct.com/ia/xml/xmlgw.phtml"
+
+    Faker.seed(21)
+    preserved_session = xmltodict.parse(
+        scrub_response_body(
+            session_xml,
+            {"sessionid", "endpoint"},
+            Faker(),
+            {},
+            token_keys,
+        )
+    )
+    api_p = preserved_session["response"]["operation"]["result"]["data"]["api"]
+    assert api_p["sessionid"] == "LiveSessionIdABC123"
+    assert api_p["endpoint"] == "https://api.intacct.com/ia/xml/xmlgw.phtml"
+
+    query_xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        "<response><operation><result><data "
+        'listtype="CLASS" totalcount="3" offset="0" count="1" numremaining="2">'
+        "<CLASS><NAME>Ada</NAME><EMAIL>ada@example.com</EMAIL></CLASS>"
+        "</data></result></operation></response>"
+    )
+    Faker.seed(22)
+    scrubbed_query = xmltodict.parse(
+        scrub_response_body(query_xml, {"@totalcount"}, Faker(), {}, token_keys)
+    )
+    qdata = scrubbed_query["response"]["operation"]["result"]["data"]
+    assert qdata["@totalcount"] == "3"
+    assert qdata["CLASS"]["NAME"] != "Ada"
+    assert qdata["CLASS"]["EMAIL"] != "ada@example.com"
+
+    req_xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        "<request><control><password>secret-live-pw</password>"
+        "<senderid>hotglueMPP</senderid></control>"
+        "<operation><authentication><login>"
+        "<userid>emma</userid><password>user-secret-pw</password>"
+        "</login></authentication></operation></request>"
+    )
+    scrubbed_req = xmltodict.parse(scrub_request_body(req_xml, token_keys))
+    assert scrubbed_req["request"]["control"]["password"] == "sec***"
+    assert scrubbed_req["request"]["control"]["senderid"] == "hotglueMPP"
+    assert scrubbed_req["request"]["operation"]["authentication"]["login"]["password"] == (
+        "use***"
+    )
+    assert scrubbed_req["request"]["operation"]["authentication"]["login"]["userid"] == (
+        "emma"
+    )
+
+    xml_cassette = tmp / "xml_vcr.yaml"
+    write_cassette(
+        xml_cassette,
+        {
+            "interactions": [
+                {
+                    "request": {
+                        "uri": "https://api.intacct.com/ia/xml/xmlgw.phtml",
+                        "body": req_xml,
+                    },
+                    "response": {
+                        "body": {"string": session_xml},
+                        "headers": {"Content-Length": [str(len(session_xml))]},
+                    },
+                }
+            ]
+        },
+    )
+    Faker.seed(23)
+    cache_xml = {}
+    sanitize_cassette_file(
+        xml_cassette,
+        scrub_response=lambda b: scrub_response_body(
+            b, {"sessionid", "endpoint"}, Faker(), cache_xml, token_keys
+        ),
+        scrub_request=lambda b: scrub_request_body(b, token_keys),
+    )
+    xml_data = load_cassette(xml_cassette)
+    out_req = xmltodict.parse(xml_data["interactions"][0]["request"]["body"])
+    assert out_req["request"]["control"]["password"] == "sec***"
+    out_resp = xmltodict.parse(
+        xml_data["interactions"][0]["response"]["body"]["string"]
+    )
+    out_api = out_resp["response"]["operation"]["result"]["data"]["api"]
+    assert out_api["sessionid"] == "LiveSessionIdABC123"
+    assert out_api["endpoint"] == "https://api.intacct.com/ia/xml/xmlgw.phtml"
 
 
 def main() -> None:
