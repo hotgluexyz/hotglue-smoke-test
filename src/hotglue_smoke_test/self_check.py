@@ -524,6 +524,25 @@ def _check_sanitize_round_trip(tmp: Path) -> None:
         "emma"
     )
 
+    attr_req_xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<request><login Password="attr-secret" token="Bearer-live"/>'
+        "<control><Password>elem-secret</Password></control></request>"
+    )
+    scrubbed_attr_req = xmltodict.parse(scrub_request_body(attr_req_xml, token_keys))
+    assert scrubbed_attr_req["request"]["login"]["@Password"] == "att***"
+    assert scrubbed_attr_req["request"]["login"]["@token"] == "Bea***"
+    assert scrubbed_attr_req["request"]["control"]["Password"] == "ele***"
+
+    attr_resp_xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<response><session Password="resp-secret"/></response>'
+    )
+    scrubbed_attr_resp = xmltodict.parse(
+        scrub_response_body(attr_resp_xml, set(), Faker(), {}, token_keys)
+    )
+    assert scrubbed_attr_resp["response"]["session"]["@Password"] == "res***"
+
     xml_cassette = tmp / "xml_vcr.yaml"
     write_cassette(
         xml_cassette,

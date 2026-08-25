@@ -117,9 +117,11 @@ def redact_credential(value: Any) -> Any:
 def scrub_tokens_in_json(data: Any, token_keys: set[str]) -> Any:
     """Replace credential values (any depth) with a stable prefix*** placeholder."""
     if isinstance(data, dict):
+        keys_lower = {k.lower() for k in token_keys}
         out = {}
         for key, value in data.items():
-            if key in token_keys:
+            key_lower = key.lower()
+            if key_lower in keys_lower or (key.startswith("@") and key_lower[1:] in keys_lower):
                 out[key] = redact_credential(value)
             else:
                 out[key] = scrub_tokens_in_json(value, token_keys)
@@ -137,9 +139,11 @@ def scrub_json_tree(
 ) -> Any:
     """Recursively scrub JSON leaves; preserve_keys keep their values as-is."""
     if isinstance(obj, dict):
+        keys_lower = {k.lower() for k in preserve_keys}
         out = {}
         for key, value in obj.items():
-            if key in preserve_keys:
+            kl = key.lower()
+            if kl in keys_lower or (key.startswith("@") and kl[1:] in keys_lower):
                 out[key] = value
             elif isinstance(value, dict):
                 out[key] = scrub_json_tree(
