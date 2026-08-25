@@ -536,7 +536,8 @@ def _check_sanitize_round_trip(tmp: Path) -> None:
                     },
                     "response": {
                         "body": {"string": session_xml},
-                        "headers": {"Content-Length": [str(len(session_xml))]},
+                        # lowercase key as urllib3/VCR stores Intacct responses
+                        "headers": {"content-length": [str(len(session_xml))]},
                     },
                 }
             ]
@@ -554,12 +555,14 @@ def _check_sanitize_round_trip(tmp: Path) -> None:
     xml_data = load_cassette(xml_cassette)
     out_req = xmltodict.parse(xml_data["interactions"][0]["request"]["body"])
     assert out_req["request"]["control"]["password"] == "sec***"
-    out_resp = xmltodict.parse(
-        xml_data["interactions"][0]["response"]["body"]["string"]
-    )
+    out_body = xml_data["interactions"][0]["response"]["body"]["string"]
+    out_resp = xmltodict.parse(out_body)
     out_api = out_resp["response"]["operation"]["result"]["data"]["api"]
     assert out_api["sessionid"] == "LiveSessionIdABC123"
     assert out_api["endpoint"] == "https://api.intacct.com/ia/xml/xmlgw.phtml"
+    assert xml_data["interactions"][0]["response"]["headers"]["content-length"] == [
+        str(len(out_body.encode("utf-8")))
+    ]
 
 
 def main() -> None:

@@ -372,7 +372,8 @@ def _apply_body_scrub(
 
 
 def _update_content_length(headers: dict, body: Any) -> None:
-    if "Content-Length" not in headers:
+    cl_key = next((k for k in headers if k.lower() == "content-length"), None)
+    if cl_key is None:
         return
     if isinstance(body, dict) and "string" in body:
         stored = body["string"]
@@ -381,7 +382,7 @@ def _update_content_length(headers: dict, body: Any) -> None:
     if stored is None:
         return
     nbytes = len(stored) if isinstance(stored, bytes) else len(str(stored).encode("utf-8"))
-    headers["Content-Length"] = [str(nbytes)]
+    headers[cl_key] = [str(nbytes)]
 
 
 def sanitize_cassette_file(
