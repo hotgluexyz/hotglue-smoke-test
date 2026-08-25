@@ -335,7 +335,7 @@ def scrub_response_body(
     parsed = _parse_body(body)
     if parsed is None:
         raise NotImplementedError(
-            "VCR response body is not JSON or XML; refusing to leave HTML/plain text unscrubbed"
+            "VCR response body is not a valid JSON or XML; refusing to leave HTML/plain text unscrubbed"
         )
     data, kind = parsed
     return _dump_body(
@@ -348,7 +348,9 @@ def scrub_request_body(body: str, token_keys: set[str]) -> str:
     """Redact TOKEN_KEYS in XML/JSON request bodies; leave opaque bodies unchanged."""
     parsed = _parse_body(body)
     if parsed is None:
-        return body
+        raise NotImplementedError(
+            "VCR request body is not a valid JSON or XML; refusing to leave HTML/plain text unscrubbed"
+        )
     data, kind = parsed
     return _dump_body(
         scrub_tokens_in_json(data, token_keys), 
