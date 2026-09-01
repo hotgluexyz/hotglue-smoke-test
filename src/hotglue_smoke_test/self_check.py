@@ -138,9 +138,9 @@ def _check_etl_deterministic_scrub() -> None:
         token_keys=set(),
         should_scrub_key=lambda _k: False,
     )
-    assert scrubbed.iloc[0]["email"] != "real@example.com"
-    # Nested leaf keeps owning key so faker uses email-shaped replacement.
-    assert "@" in scrubbed.iloc[0]["email"]
+    assert scrubbed.iloc[0]["email"].startswith("fake.") and scrubbed.iloc[0]["email"].endswith(
+        "@example.com"
+    )
     assert scrubbed.iloc[1][1] == "PENDING"
     assert scrubbed.iloc[1][0] != "secret_a"
 
@@ -370,11 +370,11 @@ def _check_sanitize_round_trip(tmp: Path) -> None:
     assert scrubbed["access_token"] == "sec***"
     assert scrubbed["nested"]["access_token"] == "nes***"
     assert scrubbed["updatedAt"] == "2026-07-07T15:00:00Z"
-    assert scrubbed["email"] != "real@example.com"
-    assert "@" in scrubbed["Email"] and scrubbed["Email"] != "Alias@Example.com"
-    assert scrubbed["first_name"] != "Ada"
+    assert scrubbed["email"].startswith("fake.") and scrubbed["email"].endswith("@example.com")
+    assert scrubbed["Email"].startswith("fake.") and scrubbed["Email"].endswith("@example.com")
+    assert scrubbed["first_name"].startswith("Fake-") and scrubbed["first_name"] != "Fake-Ada"
     assert scrubbed["nested"]["email"] == scrubbed["email"]
-    assert scrubbed["nested"]["phone"] != "+15551234"
+    assert scrubbed["nested"]["phone"].startswith("555-01")
     assert scrubbed["quantity"] != 42 and isinstance(scrubbed["quantity"], int)
     assert isinstance(scrubbed["enabled"], bool)
     # hasNextPage-style keys stay real when preserved (tap owns pagination allowlist)
@@ -407,8 +407,8 @@ def _check_sanitize_round_trip(tmp: Path) -> None:
         token_keys,
     )
     dotted_data = json.loads(dotted)
-    assert dotted_data["BILLTO.FIRSTNAME"] != "Ada"
-    assert dotted_data["BILLTO.FIRSTNAME"].isalpha()
+    assert dotted_data["BILLTO.FIRSTNAME"].startswith("Fake-")
+    assert dotted_data["BILLTO.FIRSTNAME"] != "Fake-Ada"
 
     # XML-ish numeric/bool strings must stay coercible (not Fallback)
     Faker.seed(31)
@@ -450,7 +450,7 @@ def _check_sanitize_round_trip(tmp: Path) -> None:
         )
     )
     assert arr[0]["api_key"] == "sec***"
-    assert arr[0]["name"] != "Ada"
+    assert arr[0]["name"].startswith("Fake-") and arr[0]["name"] != "Fake-Ada"
 
     try:
         scrub_response_body("<html>nope</html>", set(), Faker(), {}, token_keys)

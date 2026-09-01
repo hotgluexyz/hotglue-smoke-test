@@ -222,27 +222,27 @@ def make_faker_replace_fn(faker, cache: dict) -> Callable[[str, Any], Any]:
         field = key.split(".")[-1].replace("_", "").lower()
 
         if field in _EMAIL_FIELDS:
-            fake = faker.email()
+            fake = f"fake.{faker.user_name()}@example.com"
         elif field in _PHONE_FIELDS:
-            fake = faker.phone_number()
+            fake = faker.numerify("555-01##")
         elif field in _IP_FIELDS:
-            fake = faker.ipv4()
+            fake = faker.numerify("203.0.113.#")
         elif field in _FIRST_NAME_FIELDS:
-            fake = faker.first_name()
+            fake = f"Fake-{faker.first_name()}"
         elif field in _LAST_NAME_FIELDS:
-            fake = faker.last_name()
+            fake = f"Fake-{faker.last_name()}"
         elif field in _COMPANY_NAME_FIELDS:
-            fake = faker.company()
+            fake = f"Fake-{faker.company()}"
         elif field in _PERSON_NAME_FIELDS:
-            fake = faker.name()
+            fake = f"Fake-{faker.name()}"
         elif field in _STREET_FIELDS:
-            fake = faker.street_address()
+            fake = f"Fake-{faker.street_address()}"
         elif field in _CITY_FIELDS:
-            fake = faker.city()
+            fake = f"Fake-{faker.city()}"
         elif field in _POSTAL_FIELDS:
             fake = faker.postcode()
         elif field in _REGION_FIELDS:
-            fake = faker.state()
+            fake = f"Fake-{faker.state()}"
         elif field in _LAT_FIELDS:
             fake = float(faker.latitude())
         elif field in _LON_FIELDS:
