@@ -8,6 +8,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
+import xmltodict
 from faker import Faker
 from vcr.request import Request
 
@@ -29,8 +30,10 @@ from hotglue_smoke_test.cli import _preflight_cases
 from hotglue_smoke_test.vcr.base import VCRBaseTestRunner
 from hotglue_smoke_test.vcr.sanitize import (
     load_cassette,
+    make_faker_replace_fn,
     sanitize_cassette_file,
     sanitize_config_credentials,
+    scrub_request_body,
     scrub_response_body,
     write_cassette,
 )
@@ -137,9 +140,9 @@ def _check_etl_deterministic_scrub() -> None:
         token_keys=set(),
         should_scrub_key=lambda _k: False,
     )
-    assert scrubbed.iloc[0]["email"] != "real@example.com"
-    # Nested leaf keeps owning key so faker uses email-shaped replacement.
-    assert "@" in scrubbed.iloc[0]["email"]
+    assert scrubbed.iloc[0]["email"].startswith("fake.") and scrubbed.iloc[0]["email"].endswith(
+        "@example.com"
+    )
     assert scrubbed.iloc[1][1] == "PENDING"
     assert scrubbed.iloc[1][0] != "secret_a"
 
@@ -369,11 +372,11 @@ def _check_sanitize_round_trip(tmp: Path) -> None:
     assert scrubbed["access_token"] == "sec***"
     assert scrubbed["nested"]["access_token"] == "nes***"
     assert scrubbed["updatedAt"] == "2026-07-07T15:00:00Z"
-    assert scrubbed["email"] != "real@example.com"
-    assert "@" in scrubbed["Email"] and scrubbed["Email"] != "Alias@Example.com"
-    assert scrubbed["first_name"] != "Ada"
+    assert scrubbed["email"].startswith("fake.") and scrubbed["email"].endswith("@example.com")
+    assert scrubbed["Email"].startswith("fake.") and scrubbed["Email"].endswith("@example.com")
+    assert scrubbed["first_name"].startswith("Fake-") and scrubbed["first_name"] != "Fake-Ada"
     assert scrubbed["nested"]["email"] == scrubbed["email"]
-    assert scrubbed["nested"]["phone"] != "+15551234"
+    assert scrubbed["nested"]["phone"].startswith("555-01")
     assert scrubbed["quantity"] != 42 and isinstance(scrubbed["quantity"], int)
     assert isinstance(scrubbed["enabled"], bool)
     # hasNextPage-style keys stay real when preserved (tap owns pagination allowlist)
@@ -406,8 +409,36 @@ def _check_sanitize_round_trip(tmp: Path) -> None:
         token_keys,
     )
     dotted_data = json.loads(dotted)
-    assert dotted_data["BILLTO.FIRSTNAME"] != "Ada"
-    assert dotted_data["BILLTO.FIRSTNAME"].isalpha()
+    assert dotted_data["BILLTO.FIRSTNAME"].startswith("Fake-")
+    assert dotted_data["BILLTO.FIRSTNAME"] != "Fake-Ada"
+
+    # XML-ish numeric/bool strings must stay coercible (not Fallback)
+    Faker.seed(31)
+    plain_vcr = make_faker_replace_fn(Faker(), {})
+    for sample in (".03", "5.", "12.5"):
+        out = plain_vcr("AMOUNT", sample)
+        assert isinstance(out, str) and out != sample
+        assert not out.startswith("-Fallback-scrubbed-")
+        float(out)
+    for sample in ("true", "false", "TRUE", "False"):
+        out = plain_vcr("billable", sample)
+        assert isinstance(out, str)
+        assert out in ("true", "false")
+    # date / date-time strings stay parseable (not Fallback)
+    from dateutil.parser import parse as parse_dt
+
+    for sample, pattern in (
+        ("06/24/2026", r"\d{2}/\d{2}/\d{4}"),
+        ("06/24/2026 14:57:36", r"\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}"),
+        ("2026-07-15", r"\d{4}-\d{2}-\d{2}"),
+        ("2026-07-03 13:00:00", r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}"),
+        ("2026-08-25T19:32:25+00:00", r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+00:00"),
+    ):
+        out = plain_vcr("WHENCREATED", sample)
+        assert isinstance(out, str) and out != sample
+        assert not out.startswith("-Fallback-scrubbed-")
+        assert re.fullmatch(pattern, out), (sample, out)
+        parse_dt(out)
 
     # array-rooted responses must still redact TOKEN_KEYS (not skip / preserve live)
     Faker.seed(13)
@@ -421,14 +452,138 @@ def _check_sanitize_round_trip(tmp: Path) -> None:
         )
     )
     assert arr[0]["api_key"] == "sec***"
-    assert arr[0]["name"] != "Ada"
+    assert arr[0]["name"].startswith("Fake-") and arr[0]["name"] != "Fake-Ada"
 
     try:
         scrub_response_body("<html>nope</html>", set(), Faker(), {}, token_keys)
     except NotImplementedError:
         pass
     else:
-        raise AssertionError("expected NotImplementedError for non-JSON body")
+        raise AssertionError("expected NotImplementedError for non-JSON/non-XML body")
+
+    session_xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        "<response><operation><result><data><api>"
+        "<sessionid>LiveSessionIdABC123</sessionid>"
+        "<endpoint>https://api.intacct.com/ia/xml/xmlgw.phtml</endpoint>"
+        "</api></data></result></operation></response>"
+    )
+    Faker.seed(21)
+    scrubbed_session = xmltodict.parse(
+        scrub_response_body(session_xml, set(), Faker(), {}, token_keys)
+    )
+    api = scrubbed_session["response"]["operation"]["result"]["data"]["api"]
+    assert api["sessionid"] != "LiveSessionIdABC123"
+    assert api["endpoint"] != "https://api.intacct.com/ia/xml/xmlgw.phtml"
+
+    Faker.seed(21)
+    preserved_session = xmltodict.parse(
+        scrub_response_body(
+            session_xml,
+            {"sessionid", "endpoint"},
+            Faker(),
+            {},
+            token_keys,
+        )
+    )
+    api_p = preserved_session["response"]["operation"]["result"]["data"]["api"]
+    assert api_p["sessionid"] == "LiveSessionIdABC123"
+    assert api_p["endpoint"] == "https://api.intacct.com/ia/xml/xmlgw.phtml"
+
+    query_xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        "<response><operation><result><data "
+        'listtype="CLASS" totalcount="3" offset="0" count="1" numremaining="2">'
+        "<CLASS><NAME>Ada</NAME><EMAIL>ada@example.com</EMAIL></CLASS>"
+        "</data></result></operation></response>"
+    )
+    Faker.seed(22)
+    scrubbed_query = xmltodict.parse(
+        scrub_response_body(query_xml, {"@totalcount"}, Faker(), {}, token_keys)
+    )
+    qdata = scrubbed_query["response"]["operation"]["result"]["data"]
+    assert qdata["@totalcount"] == "3"
+    assert qdata["CLASS"]["NAME"].startswith("Fake-") and qdata["CLASS"]["NAME"] != "Fake-Ada"
+    assert qdata["CLASS"]["EMAIL"].startswith("fake.") and qdata["CLASS"]["EMAIL"].endswith(
+        "@example.com"
+    )
+
+    req_xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        "<request><control><password>secret-live-pw</password>"
+        "<senderid>hotglueMPP</senderid></control>"
+        "<operation><authentication><login>"
+        "<userid>emma</userid><password>user-secret-pw</password>"
+        "</login></authentication></operation></request>"
+    )
+    scrubbed_req = xmltodict.parse(scrub_request_body(req_xml, token_keys))
+    assert scrubbed_req["request"]["control"]["password"] == "sec***"
+    assert scrubbed_req["request"]["control"]["senderid"] == "hotglueMPP"
+    assert scrubbed_req["request"]["operation"]["authentication"]["login"]["password"] == (
+        "use***"
+    )
+    assert scrubbed_req["request"]["operation"]["authentication"]["login"]["userid"] == (
+        "emma"
+    )
+
+    attr_req_xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<request><login Password="attr-secret" token="Bearer-live"/>'
+        "<control><Password>elem-secret</Password></control></request>"
+    )
+    scrubbed_attr_req = xmltodict.parse(scrub_request_body(attr_req_xml, token_keys))
+    assert scrubbed_attr_req["request"]["login"]["@Password"] == "att***"
+    assert scrubbed_attr_req["request"]["login"]["@token"] == "Bea***"
+    assert scrubbed_attr_req["request"]["control"]["Password"] == "ele***"
+
+    attr_resp_xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<response><session Password="resp-secret"/></response>'
+    )
+    scrubbed_attr_resp = xmltodict.parse(
+        scrub_response_body(attr_resp_xml, set(), Faker(), {}, token_keys)
+    )
+    assert scrubbed_attr_resp["response"]["session"]["@Password"] == "res***"
+
+    xml_cassette = tmp / "xml_vcr.yaml"
+    write_cassette(
+        xml_cassette,
+        {
+            "interactions": [
+                {
+                    "request": {
+                        "uri": "https://api.intacct.com/ia/xml/xmlgw.phtml",
+                        "body": req_xml,
+                    },
+                    "response": {
+                        "body": {"string": session_xml},
+                        # lowercase key as urllib3/VCR stores Intacct responses
+                        "headers": {"content-length": [str(len(session_xml))]},
+                    },
+                }
+            ]
+        },
+    )
+    Faker.seed(23)
+    cache_xml = {}
+    sanitize_cassette_file(
+        xml_cassette,
+        scrub_response=lambda b: scrub_response_body(
+            b, {"sessionid", "endpoint"}, Faker(), cache_xml, token_keys
+        ),
+        scrub_request=lambda b: scrub_request_body(b, token_keys),
+    )
+    xml_data = load_cassette(xml_cassette)
+    out_req = xmltodict.parse(xml_data["interactions"][0]["request"]["body"])
+    assert out_req["request"]["control"]["password"] == "sec***"
+    out_body = xml_data["interactions"][0]["response"]["body"]["string"]
+    out_resp = xmltodict.parse(out_body)
+    out_api = out_resp["response"]["operation"]["result"]["data"]["api"]
+    assert out_api["sessionid"] == "LiveSessionIdABC123"
+    assert out_api["endpoint"] == "https://api.intacct.com/ia/xml/xmlgw.phtml"
+    assert xml_data["interactions"][0]["response"]["headers"]["content-length"] == [
+        str(len(out_body.encode("utf-8")))
+    ]
 
 
 def main() -> None:
