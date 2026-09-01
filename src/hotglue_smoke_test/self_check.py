@@ -410,7 +410,7 @@ def _check_sanitize_round_trip(tmp: Path) -> None:
     assert dotted_data["BILLTO.FIRSTNAME"].startswith("Fake-")
     assert dotted_data["BILLTO.FIRSTNAME"] != "Fake-Ada"
 
-    # XML-ish numeric/bool strings must stay coercible (not Fallback)
+    # numeric/bool strings must stay coercible (not Fallback)
     Faker.seed(31)
     plain_vcr = make_faker_replace_fn(Faker(), {})
     for sample in (".03", "5.", "12.5"):
