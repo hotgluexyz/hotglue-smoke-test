@@ -166,9 +166,9 @@ hotglue-smoke-test run
 hotglue-smoke-test run orders_test
 ```
 
-**Tap:** `record` scrubs by default after the live HTTP capture (cassette response bodies + connector `record-vcr.py` rules).
+**Tap:** `record` scrubs by default after the live HTTP capture (cassette response bodies + connector `record-vcr.py` rules). Scrubbed PII is intentionally marked so reviewers/scanners can tell it from live data: `Fake-` on names/addresses, `555-01xx` phones, `fake.*@example.com` emails, `203.0.113.x` IPs (untyped strings use `-Fallback-scrubbed-…`).
 
-**ETL:** each `record` creates `<case>/<YYYYMMDDTHHMMSS>/fixtures/` (**input**, folder name is **UTC**). First run seeds `fixtures/snapshots/`; later runs get snapshots from the previous job's `expected_output/snapshots` (or runtime) at `generate`/`run`. `generate` fills only datetime folders missing `expected_output/` unless `--force`. Fakes are hash-seeded. `PRESERVE_*` keep enum/filter literals real.
+**ETL:** each `record` creates `<case>/<YYYYMMDDTHHMMSS>/fixtures/` (**input**, folder name is **UTC**). First run seeds `fixtures/snapshots/`; later runs get snapshots from the previous job's `expected_output/snapshots` (or runtime) at `generate`/`run`. `generate` fills only datetime folders missing `expected_output/` unless `--force`. Fakes are hash-seeded (same obvious markers as tap scrub). `PRESERVE_*` keep enum/filter literals real.
 
 Auto-detect: `record-etl.py` → ETL; elif repo name `target-*` → target; else tap. Validation is CLI `_preflight_cases` (artifacts helpers); `--force` wipes run in `_prepare_case`. Add `--force` on `record`/`generate` to overwrite.
 

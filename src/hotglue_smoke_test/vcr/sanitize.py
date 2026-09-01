@@ -72,6 +72,27 @@ _LON_FIELDS = {"longitude", "lng", "lon"}
 _BIRTHDATE_FIELDS = {"birthdate", "dateofbirth", "dob"}
 # If the key isn't in a typed map above, fallback to scrubbing by value type.
 
+# date / date-time strings — keep parseable shape (singer dateutil)
+_TEMPORAL_RULES: tuple[tuple[re.Pattern[str], Callable[[Any, re.Match[str]], str]], ...] = (
+    # 03/25/2024
+    (re.compile(r"\d{2}/\d{2}/\d{4}"), lambda f, _: f.date(pattern="%m/%d/%Y")),
+    # 03/25/2024 14:30:00
+    (re.compile(r"\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}"), lambda f, _: f.date_time().strftime("%m/%d/%Y %H:%M:%S")),
+    # 2024-03-25
+    (re.compile(r"\d{4}-\d{2}-\d{2}"), lambda f, _: f.date(pattern="%Y-%m-%d")),
+    # 2024-03-25 14:30:00
+    (re.compile(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}"), lambda f, _: f.date_time().strftime("%Y-%m-%d %H:%M:%S")),
+    # 2024-03-25T14:30:00[.sss][Z|+00:00] — keep frac/tz suffix
+    (re.compile(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(\.\d+)?(Z|[+-]\d{2}:\d{2})?"),lambda f, m: f.date_time().strftime("%Y-%m-%dT%H:%M:%S") + (m.group(2) or "") + (m.group(3) or "")),
+)
+
+
+def _fake_temporal_string(stripped: str, faker) -> str | None:
+    for pattern, make in _TEMPORAL_RULES:
+        if m := pattern.fullmatch(stripped):
+            return make(faker, m)
+    return None
+
 
 def load_cassette(path: str | Path) -> dict:
     with open(path) as f:
@@ -201,27 +222,27 @@ def make_faker_replace_fn(faker, cache: dict) -> Callable[[str, Any], Any]:
         field = key.split(".")[-1].replace("_", "").lower()
 
         if field in _EMAIL_FIELDS:
-            fake = faker.email()
+            fake = f"fake.{faker.user_name()}@example.com"
         elif field in _PHONE_FIELDS:
-            fake = faker.phone_number()
+            fake = faker.numerify("555-01##")
         elif field in _IP_FIELDS:
-            fake = faker.ipv4()
+            fake = faker.numerify("203.0.113.#")
         elif field in _FIRST_NAME_FIELDS:
-            fake = faker.first_name()
+            fake = f"Fake-{faker.first_name()}"
         elif field in _LAST_NAME_FIELDS:
-            fake = faker.last_name()
+            fake = f"Fake-{faker.last_name()}"
         elif field in _COMPANY_NAME_FIELDS:
-            fake = faker.company()
+            fake = f"Fake-{faker.company()}"
         elif field in _PERSON_NAME_FIELDS:
-            fake = faker.name()
+            fake = f"Fake-{faker.name()}"
         elif field in _STREET_FIELDS:
-            fake = faker.street_address()
+            fake = f"Fake-{faker.street_address()}"
         elif field in _CITY_FIELDS:
-            fake = faker.city()
+            fake = f"Fake-{faker.city()}"
         elif field in _POSTAL_FIELDS:
             fake = faker.postcode()
         elif field in _REGION_FIELDS:
-            fake = faker.state()
+            fake = f"Fake-{faker.state()}"
         elif field in _LAT_FIELDS:
             fake = float(faker.latitude())
         elif field in _LON_FIELDS:
@@ -237,12 +258,20 @@ def make_faker_replace_fn(faker, cache: dict) -> Callable[[str, Any], Any]:
         elif isinstance(value, list):
             fake = [replace(key, item) for item in value]
         elif isinstance(value, str):
-            #integer
-            if re.fullmatch(r"-?\d+", value.strip()):
+            stripped = value.strip()
+            # bools could arrive as strings — keep str type
+            if stripped.lower() in ("true", "false"):
+                fake = "true" if faker.pybool() else "false"
+            # integer
+            elif re.fullmatch(r"-?\d+", stripped):
                 fake = str(faker.random_int())
-            #float
-            elif re.fullmatch(r"-?\d+\.\d+", value.strip()):
+            # float: 12.5, .03, 5. (not scientific)
+            elif re.fullmatch(r"-?\d+\.\d+", stripped) or \
+                re.fullmatch(r"-?\.\d+", stripped) or \
+                re.fullmatch(r"-?\d+\.", stripped):
                 fake = str(float(faker.pyfloat()))
+            elif (temporal := _fake_temporal_string(stripped, faker)) is not None:
+                fake = temporal
             else:
                 fake = f"-Fallback-scrubbed-{faker.pystr(min_chars=len(value), max_chars=len(value))}"
         else:
