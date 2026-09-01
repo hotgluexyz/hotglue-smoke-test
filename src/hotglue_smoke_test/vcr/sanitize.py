@@ -72,6 +72,27 @@ _LON_FIELDS = {"longitude", "lng", "lon"}
 _BIRTHDATE_FIELDS = {"birthdate", "dateofbirth", "dob"}
 # If the key isn't in a typed map above, fallback to scrubbing by value type.
 
+# date / date-time strings — keep parseable shape (singer dateutil)
+_TEMPORAL_RULES: tuple[tuple[re.Pattern[str], Callable[[Any, re.Match[str]], str]], ...] = (
+    # 03/25/2024
+    (re.compile(r"\d{2}/\d{2}/\d{4}"), lambda f, _: f.date(pattern="%m/%d/%Y")),
+    # 03/25/2024 14:30:00
+    (re.compile(r"\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}"), lambda f, _: f.date_time().strftime("%m/%d/%Y %H:%M:%S")),
+    # 2024-03-25
+    (re.compile(r"\d{4}-\d{2}-\d{2}"), lambda f, _: f.date(pattern="%Y-%m-%d")),
+    # 2024-03-25 14:30:00
+    (re.compile(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}"), lambda f, _: f.date_time().strftime("%Y-%m-%d %H:%M:%S")),
+    # 2024-03-25T14:30:00[.sss][Z|+00:00] — keep frac/tz suffix
+    (re.compile(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(\.\d+)?(Z|[+-]\d{2}:\d{2})?"),lambda f, m: f.date_time().strftime("%Y-%m-%dT%H:%M:%S") + (m.group(2) or "") + (m.group(3) or "")),
+)
+
+
+def _fake_temporal_string(stripped: str, faker) -> str | None:
+    for pattern, make in _TEMPORAL_RULES:
+        if m := pattern.fullmatch(stripped):
+            return make(faker, m)
+    return None
+
 
 def load_cassette(path: str | Path) -> dict:
     with open(path) as f:
@@ -237,12 +258,20 @@ def make_faker_replace_fn(faker, cache: dict) -> Callable[[str, Any], Any]:
         elif isinstance(value, list):
             fake = [replace(key, item) for item in value]
         elif isinstance(value, str):
-            #integer
-            if re.fullmatch(r"-?\d+", value.strip()):
+            stripped = value.strip()
+            # bools could arrive as strings — keep str type
+            if stripped.lower() in ("true", "false"):
+                fake = "true" if faker.pybool() else "false"
+            # integer
+            elif re.fullmatch(r"-?\d+", stripped):
                 fake = str(faker.random_int())
-            #float
-            elif re.fullmatch(r"-?\d+\.\d+", value.strip()):
+            # float: 12.5, .03, 5. (not scientific)
+            elif re.fullmatch(r"-?\d+\.\d+", stripped) or \
+                re.fullmatch(r"-?\.\d+", stripped) or \
+                re.fullmatch(r"-?\d+\.", stripped):
                 fake = str(float(faker.pyfloat()))
+            elif (temporal := _fake_temporal_string(stripped, faker)) is not None:
+                fake = temporal
             else:
                 fake = f"-Fallback-scrubbed-{faker.pystr(min_chars=len(value), max_chars=len(value))}"
         else:

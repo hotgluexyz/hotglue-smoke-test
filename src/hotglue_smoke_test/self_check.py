@@ -29,6 +29,7 @@ from hotglue_smoke_test.cli import _preflight_cases
 from hotglue_smoke_test.vcr.base import VCRBaseTestRunner
 from hotglue_smoke_test.vcr.sanitize import (
     load_cassette,
+    make_faker_replace_fn,
     sanitize_cassette_file,
     sanitize_config_credentials,
     scrub_response_body,
@@ -408,6 +409,34 @@ def _check_sanitize_round_trip(tmp: Path) -> None:
     dotted_data = json.loads(dotted)
     assert dotted_data["BILLTO.FIRSTNAME"] != "Ada"
     assert dotted_data["BILLTO.FIRSTNAME"].isalpha()
+
+    # XML-ish numeric/bool strings must stay coercible (not Fallback)
+    Faker.seed(31)
+    plain_vcr = make_faker_replace_fn(Faker(), {})
+    for sample in (".03", "5.", "12.5"):
+        out = plain_vcr("AMOUNT", sample)
+        assert isinstance(out, str) and out != sample
+        assert not out.startswith("-Fallback-scrubbed-")
+        float(out)
+    for sample in ("true", "false", "TRUE", "False"):
+        out = plain_vcr("billable", sample)
+        assert isinstance(out, str)
+        assert out in ("true", "false")
+    # date / date-time strings stay parseable (not Fallback)
+    from dateutil.parser import parse as parse_dt
+
+    for sample, pattern in (
+        ("06/24/2026", r"\d{2}/\d{2}/\d{4}"),
+        ("06/24/2026 14:57:36", r"\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}"),
+        ("2026-07-15", r"\d{4}-\d{2}-\d{2}"),
+        ("2026-07-03 13:00:00", r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}"),
+        ("2026-08-25T19:32:25+00:00", r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+00:00"),
+    ):
+        out = plain_vcr("WHENCREATED", sample)
+        assert isinstance(out, str) and out != sample
+        assert not out.startswith("-Fallback-scrubbed-")
+        assert re.fullmatch(pattern, out), (sample, out)
+        parse_dt(out)
 
     # array-rooted responses must still redact TOKEN_KEYS (not skip / preserve live)
     Faker.seed(13)
