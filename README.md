@@ -48,6 +48,17 @@ hotglue-smoke-test run orders_test        # replay → compare
 
 `module` + `launch` are required. Override `sanitize_cassette()` only when the default token scrub is not enough.
 
+Optional `<case>/test-config.json` — runner keys (`freeze_time`, `include_streams`, `ignore_streams`, `env`, `filter_query_parameters`) and compare keys on `run` (`ignore_columns`, `ignore_files`, `sort_config`, …). Tap-wide scrub lists live on `record-vcr.py` (`PRESERVE_KEYS`, `TOKEN_KEYS`, `FILTER_HEADERS`); the same three keys in test-config are **unioned** onto those instance attrs at record time for case-only extras (e.g. one stream needs `description2` preserved for replay parsing):
+
+```json
+{
+  "freeze_time": "2026-08-25T19:00:00Z",
+  "preserve_keys": ["description2"]
+}
+```
+
+Overrides of `sanitize_cassette()` should use `self.PRESERVE_KEYS` / `self.TOKEN_KEYS`, not the class attrs alone, so case test-config merges apply.
+
 ### ETL
 
 Need live `sync-output/` next to `etl.py` (seed `snapshots/` optional) and `__smoke-tests__/record-etl.py`:
@@ -90,6 +101,7 @@ tap-foo/
   __smoke-tests__/some_stream_test/
     config.json
     catalog-selected.json
+    test-config.json          # optional: runner, compare, and per-case scrub extras
     fixtures/vcr.yaml
     expected_output/data.singer
 ```
@@ -210,7 +222,7 @@ Connector `__smoke-tests__/record-vcr.py`:
 from hotglue_smoke_test.vcr.tap import VCRTapTestRunner
 ```
 
-Override `sanitize_cassette()` for connector-specific PII rules. Default base scrub redacts `TOKEN_KEYS` and fakes other leaves in JSON **and** XML response bodies; XML/JSON request bodies only redact `TOKEN_KEYS`. HTML/plain text responses still raise. Set tap `PRESERVE_KEYS` for any response keys the tap feeds into the next request or state.
+Override `sanitize_cassette()` for connector-specific PII rules. Default base scrub redacts `TOKEN_KEYS` and fakes other leaves in JSON **and** XML response bodies; XML/JSON request bodies only redact `TOKEN_KEYS`. HTML/plain text responses still raise. Set tap `PRESERVE_KEYS` for any response keys the tap feeds into the next request or state; add case-only keys via `<case>/test-config.json` `preserve_keys` (see Tap quickstart).
 
 ETL `__smoke-tests__/record-etl.py` subclasses `ETLSmokeRunner` (mirror of
 `VCRTapTestRunner`): override `should_scrub_key` when JSON dict keys must be scrubbed;

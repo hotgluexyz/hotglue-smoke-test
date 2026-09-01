@@ -92,6 +92,18 @@ class VCRBaseTestRunner(ABC):
                 os.environ[key] = str(value)
                 print(f"{key} set to: {os.environ[key]}")
 
+        self.PRESERVE_KEYS = set(self.PRESERVE_KEYS)
+        if extra := test_config.get("preserve_keys"):
+            self.PRESERVE_KEYS |= set(extra)
+
+        self.TOKEN_KEYS = list(self.TOKEN_KEYS)
+        if extra := test_config.get("token_keys"):
+            self.TOKEN_KEYS = list(dict.fromkeys([*self.TOKEN_KEYS, *extra]))
+
+        self.FILTER_HEADERS = list(self.FILTER_HEADERS)
+        if extra := test_config.get("filter_headers"):
+            self.FILTER_HEADERS = list(dict.fromkeys([*self.FILTER_HEADERS, *extra]))
+
         sys.argv = self.argv()
 
         if self.mode == "record":
