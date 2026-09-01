@@ -204,7 +204,7 @@ def _check_etl_pythonpath(tmp: Path) -> None:
     """lib_common resolves from sibling common/ (v2) or v2/common/ (v1 accounting)."""
     plain = tmp / "plain"
     (plain / "__smoke-tests__").mkdir(parents=True)
-    assert ETLSmokeRunner("case", plain / "__smoke-tests__")._pythonpath() == str(
+    assert ETLSmokeRunner("case", plain / "__smoke-tests__").pythonpath() == str(
         plain.resolve()
     )
 
@@ -214,7 +214,7 @@ def _check_etl_pythonpath(tmp: Path) -> None:
     (v2_tap.parent / "common" / "lib_common").mkdir(parents=True)
     sep = os.pathsep
     v2_runner = ETLSmokeRunner("case", v2_tap / "__smoke-tests__")
-    v2_pp = v2_runner._pythonpath().split(sep)
+    v2_pp = v2_runner.pythonpath().split(sep)
     assert v2_pp[0] == str(v2_tap.resolve())
     assert v2_pp[1] == str((v2_tap.parent / "common").resolve())
 
@@ -223,7 +223,7 @@ def _check_etl_pythonpath(tmp: Path) -> None:
     (v1_tap / "__smoke-tests__").mkdir(parents=True)
     (v1_root / "v2" / "common" / "lib_common").mkdir(parents=True)
     v1_runner = ETLSmokeRunner("case", v1_tap / "__smoke-tests__")
-    v1_pp = v1_runner._pythonpath().split(sep)
+    v1_pp = v1_runner.pythonpath().split(sep)
     assert v1_pp[0] == str(v1_tap.resolve())
     assert v1_pp[1] == str((v1_root / "v2" / "common").resolve())
 
@@ -231,7 +231,7 @@ def _check_etl_pythonpath(tmp: Path) -> None:
         COMMON_PATH = "../v2/common"
 
     override = _OverrideRunner("case", v1_tap / "__smoke-tests__")
-    assert override._pythonpath().split(sep)[1] == str((v1_root / "v2" / "common").resolve())
+    assert override.pythonpath().split(sep)[1] == str((v1_root / "v2" / "common").resolve())
 
 
 def _check_etl_compare_noops(tmp: Path) -> None:
