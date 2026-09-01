@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import tempfile
@@ -197,6 +198,40 @@ def _check_etl_deterministic_scrub() -> None:
     assert cells[1] == ""
     assert cells[2] == "NA"
     assert cells[3] != "live-token"
+
+
+def _check_etl_pythonpath(tmp: Path) -> None:
+    """lib_common resolves from sibling common/ (v2) or v2/common/ (v1 accounting)."""
+    plain = tmp / "plain"
+    (plain / "__smoke-tests__").mkdir(parents=True)
+    assert ETLSmokeRunner("case", plain / "__smoke-tests__")._pythonpath() == str(
+        plain.resolve()
+    )
+
+    v2_root = tmp / "v2_case"
+    v2_tap = v2_root / "v2" / "tap"
+    (v2_tap / "__smoke-tests__").mkdir(parents=True)
+    (v2_tap.parent / "common" / "lib_common").mkdir(parents=True)
+    sep = os.pathsep
+    v2_runner = ETLSmokeRunner("case", v2_tap / "__smoke-tests__")
+    v2_pp = v2_runner._pythonpath().split(sep)
+    assert v2_pp[0] == str(v2_tap.resolve())
+    assert v2_pp[1] == str((v2_tap.parent / "common").resolve())
+
+    v1_root = tmp / "v1_case"
+    v1_tap = v1_root / "tap"
+    (v1_tap / "__smoke-tests__").mkdir(parents=True)
+    (v1_root / "v2" / "common" / "lib_common").mkdir(parents=True)
+    v1_runner = ETLSmokeRunner("case", v1_tap / "__smoke-tests__")
+    v1_pp = v1_runner._pythonpath().split(sep)
+    assert v1_pp[0] == str(v1_tap.resolve())
+    assert v1_pp[1] == str((v1_root / "v2" / "common").resolve())
+
+    class _OverrideRunner(ETLSmokeRunner):
+        COMMON_PATH = "../v2/common"
+
+    override = _OverrideRunner("case", v1_tap / "__smoke-tests__")
+    assert override._pythonpath().split(sep)[1] == str((v1_root / "v2" / "common").resolve())
 
 
 def _check_etl_compare_noops(tmp: Path) -> None:
@@ -636,6 +671,7 @@ def main() -> None:
         _check_sanitize_round_trip(Path(tmp) / "sanitize_check")
         _check_filter_response_headers(Path(tmp) / "filter_response_headers")
         _check_etl_deterministic_scrub()
+        _check_etl_pythonpath(Path(tmp) / "etl_pythonpath")
         _check_etl_compare_noops(Path(tmp) / "etl_compare_noop")
 
         def _exit(code):
