@@ -224,7 +224,8 @@ def make_faker_replace_fn(faker, cache: dict) -> Callable[[str, Any], Any]:
         if cache_key is not None and cache_key in cache:
             return cache[cache_key]
 
-        field = key.split(".")[-1].replace("_", "").lower()
+        # xmltodict attrs are "@email"; strip @ so typed field sets still match.
+        field = key.split(".")[-1].lstrip("@").replace("_", "").lower()
 
         if field in _EMAIL_FIELDS:
             fake = f"fake.{faker.user_name()}@example.com"

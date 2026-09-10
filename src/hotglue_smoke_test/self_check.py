@@ -447,6 +447,13 @@ def _check_sanitize_round_trip(tmp: Path) -> None:
     assert dotted_data["BILLTO.FIRSTNAME"].startswith("Fake-")
     assert dotted_data["BILLTO.FIRSTNAME"] != "Fake-Ada"
 
+    # xmltodict attrs (@email) must use typed email fakes, not Fallback
+    Faker.seed(17)
+    attr_email = make_faker_replace_fn(Faker(), {})("@email", "live@example.com")
+    assert isinstance(attr_email, str)
+    assert attr_email.startswith("fake.") and attr_email.endswith("@example.com")
+    assert attr_email != "live@example.com"
+
     # numeric/bool strings must stay coercible (not Fallback)
     Faker.seed(31)
     plain_vcr = make_faker_replace_fn(Faker(), {})
