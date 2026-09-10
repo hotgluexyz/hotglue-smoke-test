@@ -34,6 +34,8 @@ class ETLSmokeRunner(ABC):
     JOB_TYPE: str | None = None
     # Optional override of script root relative to parent of __smoke-tests__.
     SCRIPT_DIR: str | None = None
+    # Optional parent of lib_common/ on PYTHONPATH (relative to script_root or absolute).
+    COMMON_PATH: str | None = None
 
     PRESERVE_COLUMNS: set[str] = set()
     PRESERVE_VALUES: set[Any] = set()
@@ -221,6 +223,26 @@ class ETLSmokeRunner(ABC):
         shutil.copytree(previous, snap_dest, ignore=shutil.ignore_patterns(".gitkeep"))
         print(f"Snapshot chained: '{previous}' -> '{snap_dest}'")
 
+    def _resolve_common_path(self) -> Path | None:
+        rel = self.COMMON_PATH
+        if rel:
+            p = Path(rel)
+            return (self.script_root / p).resolve() if not p.is_absolute() else p.resolve()
+        for candidate in (
+            self.script_root.parent / "common",
+            self.script_root.parent / "v2" / "common",
+        ):
+            if (candidate / "lib_common").is_dir():
+                return candidate.resolve()
+        return None
+
+    def pythonpath(self) -> str:
+        parts = [str(self.script_root)]
+        common = self._resolve_common_path()
+        if common:
+            parts.append(str(common))
+        return os.pathsep.join(parts)
+
     def _run_etl(self, root_dir: Path, today: str) -> None:
         python = self._python_for_script()
         etl_py = self.script_root / "etl.py"
@@ -240,7 +262,7 @@ class ETLSmokeRunner(ABC):
                 "output_dir": str(root_dir / "etl-output"),
                 "snapshot_dir": str(root_dir / "snapshots"),
                 "today": today,
-                "PYTHONPATH": str(self.script_root),
+                "PYTHONPATH": self.pythonpath(),
                 "VIRTUAL_ENV": str(self.script_root / ".venv"),
                 "PATH": f"{self.script_root / '.venv' / 'bin'}:{env.get('PATH', '')}",
             }
