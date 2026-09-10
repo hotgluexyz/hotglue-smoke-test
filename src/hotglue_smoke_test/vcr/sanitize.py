@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 from typing import Any, Callable
 
+import xmltodict
 import yaml
 
 # Typed PII generators by normalized field name (casing / snake_case / dotted aliases).
@@ -116,9 +117,11 @@ def redact_credential(value: Any) -> Any:
 def scrub_tokens_in_json(data: Any, token_keys: set[str]) -> Any:
     """Replace credential values (any depth) with a stable prefix*** placeholder."""
     if isinstance(data, dict):
+        keys_lower = {k.lower() for k in token_keys}
         out = {}
         for key, value in data.items():
-            if key in token_keys:
+            key_lower = key.lower()
+            if key_lower in keys_lower or (key.startswith("@") and key_lower[1:] in keys_lower):
                 out[key] = redact_credential(value)
             else:
                 out[key] = scrub_tokens_in_json(value, token_keys)
@@ -136,9 +139,11 @@ def scrub_json_tree(
 ) -> Any:
     """Recursively scrub JSON leaves; preserve_keys keep their values as-is."""
     if isinstance(obj, dict):
+        keys_lower = {k.lower() for k in preserve_keys}
         out = {}
         for key, value in obj.items():
-            if key in preserve_keys:
+            kl = key.lower()
+            if kl in keys_lower or (key.startswith("@") and kl[1:] in keys_lower):
                 out[key] = value
             elif isinstance(value, dict):
                 out[key] = scrub_json_tree(
@@ -219,7 +224,8 @@ def make_faker_replace_fn(faker, cache: dict) -> Callable[[str, Any], Any]:
         if cache_key is not None and cache_key in cache:
             return cache[cache_key]
 
-        field = key.split(".")[-1].replace("_", "").lower()
+        # xmltodict attrs are "@email"; strip @ so typed field sets still match.
+        field = key.split(".")[-1].lstrip("@").replace("_", "").lower()
 
         if field in _EMAIL_FIELDS:
             fake = f"fake.{faker.user_name()}@example.com"
@@ -285,6 +291,40 @@ def make_faker_replace_fn(faker, cache: dict) -> Callable[[str, Any], Any]:
     return replace
 
 
+def _parse_body(body: str) -> tuple[Any, str] | None:
+    """Return (data, 'json'|'xml'), or None if unsupported."""
+    try:
+        return json.loads(body), "json"
+    except json.JSONDecodeError:
+        pass
+    if body.lstrip().startswith("<?xml"):
+        try:
+            return xmltodict.parse(body), "xml"
+        except Exception:
+            return None
+    return None
+
+
+def _dump_body(data: Any, kind: str) -> str:
+    return json.dumps(data) if kind == "json" else xmltodict.unparse(data, full_document=True)
+
+
+def scrub_parsed_body(
+    data: Any,
+    preserve_keys: set[str],
+    faker,
+    cache: dict,
+    token_keys: set[str],
+) -> Any:
+    """Redact tokens then default-scrub leaves; preserve_keys / token_keys stay as placeholders or real."""
+    data = scrub_tokens_in_json(data, token_keys)
+    return scrub_json_tree(
+        data,
+        preserve_keys=preserve_keys | token_keys,
+        replace_fn=make_faker_replace_fn(faker, cache),
+    )
+
+
 def scrub_response_body(
     body: str,
     preserve_keys: set[str],
@@ -292,31 +332,74 @@ def scrub_response_body(
     cache: dict,
     token_keys: set[str],
 ) -> str:
-    """Parse response JSON, redact tokens, default-scrub other leaves, re-serialize."""
-    try:
-        data = json.loads(body)
-    except json.JSONDecodeError as exc:
+    """Parse JSON or XML response, redact tokens, default-scrub other leaves, re-serialize."""
+    parsed = _parse_body(body)
+    if parsed is None:
         raise NotImplementedError(
-            "VCR response body is not JSON; refusing to leave HTML/XML/plain text unscrubbed"
-        ) from exc
-
-    # Redact on real values first; preserve those keys so hard scrub won't rewrite them.
-    data = scrub_tokens_in_json(data, token_keys)
-    data = scrub_json_tree(
-        data,
-        preserve_keys=preserve_keys | token_keys,
-        replace_fn=make_faker_replace_fn(faker, cache),
+            "VCR response body is not a valid JSON or XML; refusing to leave HTML/plain text unscrubbed"
+        )
+    data, kind = parsed
+    return _dump_body(
+        scrub_parsed_body(data, preserve_keys, faker, cache, token_keys),
+        kind,
     )
-    return json.dumps(data)
+
+
+def scrub_request_body(body: str, token_keys: set[str]) -> str:
+    """Redact TOKEN_KEYS in XML/JSON request bodies; leave opaque bodies unchanged."""
+    parsed = _parse_body(body)
+    if parsed is None:
+        raise NotImplementedError(
+            "VCR request body is not a valid JSON or XML; refusing to leave HTML/plain text unscrubbed"
+        )
+    data, kind = parsed
+    return _dump_body(
+        scrub_tokens_in_json(data, token_keys), 
+        kind
+    )
+
+
+def _apply_body_scrub(
+    raw: Any,
+    scrub: Callable[[str], str],
+) -> Any:
+    """Scrub a cassette body value that may be str, bytes, or {string: ...}."""
+    if isinstance(raw, dict) and "string" in raw:
+        inner = raw["string"]
+        if isinstance(inner, bytes):
+            scrubbed = scrub(inner.decode("utf-8")).encode("utf-8")
+        else:
+            scrubbed = scrub(str(inner))
+        return {**raw, "string": scrubbed}
+    if isinstance(raw, bytes):
+        return scrub(raw.decode("utf-8")).encode("utf-8")
+    if isinstance(raw, str):
+        return scrub(raw)
+    return raw
+
+
+def _update_content_length(headers: dict, body: Any) -> None:
+    cl_key = next((k for k in headers if k.lower() == "content-length"), None)
+    if cl_key is None:
+        return
+    if isinstance(body, dict) and "string" in body:
+        stored = body["string"]
+    else:
+        stored = body
+    if stored is None:
+        return
+    nbytes = len(stored) if isinstance(stored, bytes) else len(str(stored).encode("utf-8"))
+    headers[cl_key] = [str(nbytes)]
 
 
 def sanitize_cassette_file(
     path: str | Path,
     *,
     scrub_response: Callable[[str], str] | None = None,
+    scrub_request: Callable[[str], str] | None = None,
     scrub_uri: Callable[[str], str] | None = None,
 ) -> None:
-    """Load cassette, scrub response bodies (and optional URIs), write back in place."""
+    """Load cassette, scrub request/response bodies (and optional URIs), write back in place."""
     path = Path(path)
     cassette = load_cassette(path)
     interactions = cassette.get("interactions") or []
@@ -326,28 +409,19 @@ def sanitize_cassette_file(
         if scrub_uri and "uri" in request:
             request["uri"] = scrub_uri(request["uri"])
 
+        if scrub_request is not None and "body" in request and request["body"] is not None:
+            request["body"] = _apply_body_scrub(request["body"], scrub_request)
+            _update_content_length(request.get("headers") or {}, request["body"])
+
         if scrub_response is None:
             continue
 
         response = interaction.get("response") or {}
-        body = response.get("body") or {}
-        raw = body.get("string")
-        if raw is None:
+        body = response.get("body")
+        if body is None:
             continue
-        if isinstance(raw, bytes):
-            text = raw.decode("utf-8")
-            scrubbed = scrub_response(text)
-            body["string"] = scrubbed.encode("utf-8")
-        else:
-            scrubbed = scrub_response(str(raw))
-            body["string"] = scrubbed
-
-        headers = response.get("headers") or {}
-        if "Content-Length" in headers:
-            stored = body["string"]
-            # Byte length of the body as stored (UTF-8 for str; raw len for bytes).
-            nbytes = len(stored) if isinstance(stored, bytes) else len(stored.encode("utf-8"))
-            headers["Content-Length"] = [str(nbytes)]
+        response["body"] = _apply_body_scrub(body, scrub_response)
+        _update_content_length(response.get("headers") or {}, response["body"])
 
     write_cassette(path, cassette)
 

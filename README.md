@@ -166,7 +166,7 @@ hotglue-smoke-test run
 hotglue-smoke-test run orders_test
 ```
 
-**Tap:** `record` scrubs by default after the live HTTP capture (cassette response bodies + connector `record-vcr.py` rules). Scrubbed PII is intentionally marked so reviewers/scanners can tell it from live data: `Fake-` on names/addresses, `555-01xx` phones, `fake.*@example.com` emails, `203.0.113.x` IPs (untyped strings use `-Fallback-scrubbed-…`).
+**Tap:** `record` scrubs by default after the live HTTP capture (JSON **or** XML cassette response bodies + `TOKEN_KEYS` in request bodies when they are JSON/XML + connector `record-vcr.py` rules). Scrubbed PII is intentionally marked so reviewers/scanners can tell it from live data: `Fake-` on names/addresses, `555-01xx` phones, `fake.*@example.com` emails, `203.0.113.x` IPs (untyped strings use `-Fallback-scrubbed-…`).
 
 **ETL:** each `record` creates `<case>/<YYYYMMDDTHHMMSS>/fixtures/` (**input**, folder name is **UTC**). First run seeds `fixtures/snapshots/`; later runs get snapshots from the previous job's `expected_output/snapshots` (or runtime) at `generate`/`run`. `generate` fills only datetime folders missing `expected_output/` unless `--force`. Fakes are hash-seeded (same obvious markers as tap scrub). `PRESERVE_*` keep enum/filter literals real.
 
@@ -210,7 +210,7 @@ Connector `__smoke-tests__/record-vcr.py`:
 from hotglue_smoke_test.vcr.tap import VCRTapTestRunner
 ```
 
-Override `sanitize_cassette()` for connector-specific PII rules. Default base scrub only redacts OAuth token keys in response JSON.
+Override `sanitize_cassette()` for connector-specific PII rules. Default base scrub redacts `TOKEN_KEYS` and fakes other leaves in JSON **and** XML response bodies; XML/JSON request bodies only redact `TOKEN_KEYS`. HTML/plain text responses still raise. Set tap `PRESERVE_KEYS` for any response keys the tap feeds into the next request or state.
 
 ETL `__smoke-tests__/record-etl.py` subclasses `ETLSmokeRunner` (mirror of
 `VCRTapTestRunner`): override `should_scrub_key` when JSON dict keys must be scrubbed;
