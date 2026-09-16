@@ -353,6 +353,32 @@ def _check_filter_response_headers(tmp: Path) -> None:
         assert cassette.responses[0]["headers"]["Content-Type"] == ["application/json"]
 
 
+def _check_runner_uri_scrub(tmp: Path) -> None:
+    class _UriScrubRunner(_StubVCRRunner):
+        def scrub_uri(self, uri: str) -> str:
+            return uri.replace("person@example.com", "fake@example.com")
+
+    runner = _UriScrubRunner("case_test", str(tmp))
+    cassette_path = Path(runner.vcr_cassette_path)
+    cassette_path.parent.mkdir(parents=True, exist_ok=True)
+    write_cassette(
+        cassette_path,
+        {
+            "interactions": [
+                {
+                    "request": {"uri": "https://example.com/users/person@example.com"},
+                    "response": {},
+                }
+            ]
+        },
+    )
+
+    runner.sanitize_cassette()
+
+    cassette = load_cassette(cassette_path)
+    assert cassette["interactions"][0]["request"]["uri"].endswith("fake@example.com")
+
+
 def _check_sanitize_round_trip(tmp: Path) -> None:
     tmp.mkdir(parents=True, exist_ok=True)
     cassette_path = tmp / "vcr.yaml"
@@ -670,6 +696,7 @@ def main() -> None:
 
         _check_sanitize_round_trip(Path(tmp) / "sanitize_check")
         _check_filter_response_headers(Path(tmp) / "filter_response_headers")
+        _check_runner_uri_scrub(Path(tmp) / "runner_uri_scrub")
         _check_etl_deterministic_scrub()
         _check_etl_pythonpath(Path(tmp) / "etl_pythonpath")
         _check_etl_compare_noops(Path(tmp) / "etl_compare_noop")
