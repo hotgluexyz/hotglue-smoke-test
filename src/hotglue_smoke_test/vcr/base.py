@@ -143,7 +143,12 @@ class VCRBaseTestRunner(ABC):
             scrub_response=lambda body: scrub_response_body(
                 body, set(self.PRESERVE_KEYS), faker, cache, set(self.TOKEN_KEYS)
             ),
+            scrub_uri=self.scrub_uri,
         )
+
+    def scrub_uri(self, uri: str) -> str:
+        """Scrub a cassette request URI. Override for connector-specific path/query PII."""
+        return uri
 
     def before_record_response(self, response):
         """Drop FILTER_HEADERS from the response before writing the cassette."""
