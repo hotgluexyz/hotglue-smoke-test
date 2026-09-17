@@ -379,6 +379,56 @@ def _check_runner_uri_scrub(tmp: Path) -> None:
     assert cassette["interactions"][0]["request"]["uri"].endswith("fake@example.com")
 
 
+def _check_runner_response_scrub(tmp: Path) -> None:
+    class _ResponseScrubRunner(_StubVCRRunner):
+        def scrub_response_body(self, body: str, faker: Faker, cache: dict) -> str:
+            preserve_keys = set(self.PRESERVE_KEYS)
+            data = json.loads(body)
+            results = data.get("results", []) if isinstance(data, dict) else []
+            if any(isinstance(result, dict) and "objectTypeId" in result for result in results):
+                preserve_keys.update({"name", "objectTypeId"})
+            return scrub_response_body(
+                body, preserve_keys, faker, cache, set(self.TOKEN_KEYS)
+            )
+
+    runner = _ResponseScrubRunner("case_test", str(tmp))
+    cassette_path = Path(runner.vcr_cassette_path)
+    cassette_path.parent.mkdir(parents=True, exist_ok=True)
+    write_cassette(
+        cassette_path,
+        {
+            "interactions": [
+                {
+                    "request": {"uri": "https://example.com/objects"},
+                    "response": {
+                        "body": {
+                            "string": json.dumps(
+                                {
+                                    "results": [
+                                        {
+                                            "name": "custom_object",
+                                            "objectTypeId": "2-123",
+                                            "label": "Customer Data",
+                                        }
+                                    ]
+                                }
+                            )
+                        }
+                    },
+                }
+            ]
+        },
+    )
+
+    runner.sanitize_cassette()
+
+    cassette = load_cassette(cassette_path)
+    record = json.loads(cassette["interactions"][0]["response"]["body"]["string"])["results"][0]
+    assert record["name"] == "custom_object"
+    assert record["objectTypeId"] == "2-123"
+    assert record["label"] != "Customer Data"
+
+
 def _check_sanitize_round_trip(tmp: Path) -> None:
     tmp.mkdir(parents=True, exist_ok=True)
     cassette_path = tmp / "vcr.yaml"
@@ -697,6 +747,7 @@ def main() -> None:
         _check_sanitize_round_trip(Path(tmp) / "sanitize_check")
         _check_filter_response_headers(Path(tmp) / "filter_response_headers")
         _check_runner_uri_scrub(Path(tmp) / "runner_uri_scrub")
+        _check_runner_response_scrub(Path(tmp) / "runner_response_scrub")
         _check_etl_deterministic_scrub()
         _check_etl_pythonpath(Path(tmp) / "etl_pythonpath")
         _check_etl_compare_noops(Path(tmp) / "etl_compare_noop")

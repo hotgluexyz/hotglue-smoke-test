@@ -46,7 +46,7 @@ hotglue-smoke-test generate orders_test   # replay → expected_output/data.sing
 hotglue-smoke-test run orders_test        # replay → compare
 ```
 
-`module` + `launch` are required. Override `sanitize_cassette()` when response-body scrub rules need customization. Override `scrub_uri()` to scrub PII in request paths or query strings:
+`module` + `launch` are required. Override `scrub_response_body()` for connector-specific response-body rules, or `scrub_uri()` to scrub PII in request paths or query strings:
 
 ```python
 def scrub_uri(self, uri: str) -> str:
@@ -215,7 +215,7 @@ Connector `__smoke-tests__/record-vcr.py`:
 from hotglue_smoke_test.vcr.tap import VCRTapTestRunner
 ```
 
-Override `sanitize_cassette()` for connector-specific response-body PII rules, or `scrub_uri()` for PII in request paths or query strings. Default base scrub only redacts OAuth token keys in response JSON.
+Override `scrub_response_body()` for connector-specific response-body rules, or `scrub_uri()` for PII in request paths or query strings. Default base scrub redacts OAuth token keys and other response values.
 
 ETL `__smoke-tests__/record-etl.py` subclasses `ETLSmokeRunner` (mirror of
 `VCRTapTestRunner`): override `should_scrub_key` when JSON dict keys must be scrubbed;
