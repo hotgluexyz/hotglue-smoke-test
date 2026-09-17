@@ -12,7 +12,7 @@ from freezegun import freeze_time
 from hotglue_smoke_test.vcr.sanitize import (
     sanitize_cassette_file,
     sanitize_config_credentials,
-    scrub_response_body,
+    scrub_response_body as sanitize_response_body,
 )
 
 
@@ -140,10 +140,14 @@ class VCRBaseTestRunner(ABC):
         cache = {}
         sanitize_cassette_file(
             self.vcr_cassette_path,
-            scrub_response=lambda body: scrub_response_body(
-                body, set(self.PRESERVE_KEYS), faker, cache, set(self.TOKEN_KEYS)
-            ),
+            scrub_response=lambda body: self.scrub_response_body(body, faker, cache),
             scrub_uri=self.scrub_uri,
+        )
+
+    def scrub_response_body(self, body: str, faker: Faker, cache: dict) -> str:
+        """Scrub a cassette response body. Override for connector-specific response rules."""
+        return sanitize_response_body(
+            body, set(self.PRESERVE_KEYS), faker, cache, set(self.TOKEN_KEYS)
         )
 
     def scrub_uri(self, uri: str) -> str:
