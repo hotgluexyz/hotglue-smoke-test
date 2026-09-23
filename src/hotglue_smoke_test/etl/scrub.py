@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import ast
 import datetime
-import hashlib
 import json
 import re
 from pathlib import Path
@@ -13,7 +12,11 @@ from typing import Any, Callable
 import pandas as pd
 from faker import Faker
 
-from hotglue_smoke_test.vcr.sanitize import make_faker_replace_fn, redact_credential
+from hotglue_smoke_test.vcr.sanitize import (
+    make_faker_replace_fn,
+    redact_credential,
+    stable_seed,
+)
 
 # CSV fixtures store datetimes as strings; keep ISO-looking values unscrubbed.
 _ISO_TEMPORAL_RE = re.compile(
@@ -27,12 +30,6 @@ ShouldScrubKey = Callable[[str], bool]
 # Return an odd-length interleaved list ``[part, sep, part, ...]``: even indices are
 # scrubbed via replace, odd indices are kept as literal separators. Else None.
 SplitComposite = Callable[[str], list[str] | None]
-
-
-def stable_seed(value: Any) -> int:
-    """Stable 31-bit seed from (type, value) for cross-process deterministic fakes."""
-    raw = f"{type(value).__name__}:{value!r}".encode()
-    return int(hashlib.sha256(raw).hexdigest()[:16], 16) % (2**31)
 
 
 def _cache_key(value: Any) -> Any | None:
