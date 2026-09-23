@@ -8,6 +8,7 @@ import re
 import shutil
 import tempfile
 from pathlib import Path
+from urllib.parse import quote
 
 from faker import Faker
 from vcr.request import Request
@@ -36,6 +37,7 @@ from hotglue_smoke_test.vcr.sanitize import (
     scrub_response_body,
     write_cassette,
 )
+from hotglue_smoke_test.vcr.target_scrub import TargetValueScrubber, scrub_target_case
 from hotglue_smoke_test.compare.csv_output_comparator import compare_csv_folder
 from hotglue_smoke_test.compare.json_output_comparator import JsonOutputComparator
 from hotglue_smoke_test.compare.snapshot_output_comparator import compare_snapshots
@@ -429,6 +431,329 @@ def _check_runner_response_scrub(tmp: Path) -> None:
     assert record["label"] != "Customer Data"
 
 
+def _check_target_value_scrub(tmp: Path) -> None:
+    """One value map across Singer input, request URI/body, and response body."""
+    case = tmp / "orders_test"
+    (case / "fixtures").mkdir(parents=True)
+    cassette_path = case / "fixtures" / "vcr.yaml"
+
+    (case / "data.singer").write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "SCHEMA",
+                        "stream": "Customers",
+                        "key_properties": ["id"],
+                        "schema": {
+                            "type": "object",
+                            "properties": {"email": {"type": "string"}},
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "RECORD",
+                        "stream": "Customers",
+                        "record": {
+                            "id": "4567",
+                            "email": "real@acme.com",
+                            "companyName": "Acme Anvils",
+                            "status": "ACTIVE",
+                            "updatedAt": "2026-07-07T15:00:00Z",
+                            "balance": 120.5,
+                        },
+                    }
+                ),
+                json.dumps({"type": "STATE", "value": {"bookmarks": {"Customers": "4567"}}}),
+            ]
+        )
+        + "\n"
+    )
+
+    write_cassette(
+        cassette_path,
+        {
+            "interactions": [
+                {
+                    # lookup-before-write: the email goes out in the query string
+                    "request": {
+                        "method": "GET",
+                        "uri": "https://api.example.com/customers?email=real%40acme.com",
+                        "body": None,
+                    },
+                    "response": {
+                        "body": {
+                            "string": json.dumps(
+                                {
+                                    # same value, different field name, inside a GID
+                                    "customers": [
+                                        {
+                                            "gid": "gid://example/Customer/4567",
+                                            "contactRef": "real@acme.com",
+                                            "legalName": "Acme Anvils",
+                                        }
+                                    ]
+                                }
+                            )
+                        }
+                    },
+                },
+                {
+                    "request": {
+                        "method": "POST",
+                        "uri": "https://api.example.com/customers/4567",
+                        "body": json.dumps(
+                            {
+                                "query": "mutation { update(note: \"bill Acme Anvils\") }",
+                                "email": "real@acme.com",
+                                "access_token": "live-secret",
+                            }
+                        ),
+                    },
+                    "response": {"body": {"string": "<ok>Acme Anvils</ok>"}},
+                },
+            ]
+        },
+    )
+
+    scrubber = scrub_target_case(
+        case,
+        cassette_path,
+        preserve_keys=set(),
+        token_keys=set(VCRBaseTestRunner.TOKEN_KEYS),
+        preserve_values={"ACTIVE"},
+    )
+
+    singer = [json.loads(line) for line in (case / "data.singer").read_text().splitlines()]
+    record = singer[1]["record"]
+    fake_email = record["email"]
+    fake_company = record["companyName"]
+    assert singer[0]["schema"]["properties"]["email"] == {"type": "string"}, "schema untouched"
+    assert singer[2]["value"]["bookmarks"]["Customers"] == "4567", "state untouched"
+    assert fake_email.startswith("fake.") and fake_email.endswith("@example.com")
+    assert fake_company.startswith("Fake-") and "Acme" not in fake_company
+    # structural / non-PII values stay real so replay still matches
+    assert record["id"] == "4567"
+    assert record["status"] == "ACTIVE"
+    assert record["updatedAt"] == "2026-07-07T15:00:00Z"
+    assert record["balance"] == 120.5
+
+    cassette = load_cassette(cassette_path)
+    first, second = cassette["interactions"]
+
+    # URI keeps the client's encoding for the fake
+    assert first["request"]["uri"] == (
+        f"https://api.example.com/customers?email={quote(fake_email, safe='')}"
+    )
+    assert "acme.com" not in first["request"]["uri"]
+
+    listed = json.loads(first["response"]["body"]["string"])["customers"][0]
+    # same value under another field name maps identically; GID stays intact
+    assert listed["contactRef"] == fake_email
+    assert listed["legalName"] == fake_company
+    assert listed["gid"] == "gid://example/Customer/4567"
+
+    body = json.loads(second["request"]["body"])
+    assert body["email"] == fake_email
+    assert body["access_token"] == "liv***"
+    # embedded inside a larger string (GraphQL document)
+    assert fake_company in body["query"] and "Acme Anvils" not in body["query"]
+    # non-JSON response bodies still get value-mapped replacement
+    assert second["response"]["body"]["string"] == f"<ok>{fake_company}</ok>"
+
+    assert "real@acme.com" in scrubber.references, "reused values flagged as references"
+
+    # Field names never preserve on their own: PII under a ref/id-shaped key is still
+    # PII. Only PRESERVE_KEYS (as in the tap) and structural value shapes stay real.
+    leaky = TargetValueScrubber(set(), set(), set())
+    leaky.collect({"primaryContactRef": "jane@acme.com", "ownerId": "Jane Doe"})
+    leaky.build()
+    out = leaky.scrub_json({"primaryContactRef": "jane@acme.com", "ownerId": "Jane Doe"})
+    assert out["primaryContactRef"].endswith("@example.com")
+    assert out["ownerId"] != "Jane Doe"
+
+    kept = TargetValueScrubber({"cursor"}, set(), set())
+    kept.collect(
+        {
+            "cursor": "eyJsYXN0IjoxfQ",
+            "gid": "gid://example/Customer/4567",
+            "uuid": "3f2504e0-4f89-11d3-9a0c-0305e82c3301",
+            "createdAt": "2026-07-07T15:00:00Z",
+            "count": "4567",
+        }
+    )
+    kept.build()
+    assert kept.scrubbed_values == 0, "PRESERVE_KEYS + structural shapes stay real"
+
+    # Fakes agree with the ETL scrub, so a value scrubbed in sync-output/snapshots
+    # and in a target cassette gets the same fake.
+    etl_replace = make_deterministic_replace_fn(preserve_values=set(), cache={})
+    assert etl_replace("email", "real@acme.com") == fake_email
+
+    oid = TargetValueScrubber(set(), set(), set())
+    oid.collect({"provider": "openid"})
+    oid.build()
+    discovery = "https://developer.intuit.com/.well-known/openid_sandbox_configuration/"
+    assert oid.scrub_uri(discovery) == discovery
+
+    token_url = (
+        "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer"
+    )
+    oid.collect({"token_type": "Bearer"})
+    oid.build()
+    assert oid.scrub_uri(token_url) == token_url
+
+    # QBO lookup-before-write: Query is PRESERVE_KEYS (keep the SQL) but the
+    # Singer billNumber inside it must become the same fake as data.singer.
+    qbo = tmp / "qbo_query"
+    (qbo / "fixtures").mkdir(parents=True)
+    live_bill = "BILL-42-LIVE"
+    (qbo / "data.singer").write_text(
+        json.dumps(
+            {"type": "RECORD", "stream": "Bills", "record": {"billNumber": live_bill}}
+        )
+        + "\n"
+    )
+    write_cassette(
+        qbo / "fixtures" / "vcr.yaml",
+        {
+            "interactions": [
+                {
+                    "request": {
+                        "uri": "https://example.com/v3/company/1/batch",
+                        "body": json.dumps(
+                            {
+                                "BatchItemRequest": [
+                                    {
+                                        "bId": "bid1",
+                                        "Query": (
+                                            "select Id, DocNumber from Bill "
+                                            f"where DocNumber in ('{live_bill}')"
+                                        ),
+                                    }
+                                ]
+                            }
+                        ),
+                    },
+                    "response": {"body": {"string": "{}"}},
+                }
+            ]
+        },
+    )
+    scrub_target_case(
+        qbo,
+        qbo / "fixtures" / "vcr.yaml",
+        preserve_keys={"Query", "bId"},
+        token_keys=set(),
+    )
+    qbo_record = json.loads((qbo / "data.singer").read_text().splitlines()[0])["record"]
+    fake_bill = qbo_record["billNumber"]
+    assert fake_bill != live_bill
+    qbo_query = json.loads(
+        load_cassette(qbo / "fixtures" / "vcr.yaml")["interactions"][0]["request"]["body"]
+    )["BatchItemRequest"][0]
+    assert qbo_query["bId"] == "bid1"
+    assert fake_bill in qbo_query["Query"]
+    assert live_bill not in qbo_query["Query"]
+
+    # A singer name that is a prefix of a preserved enum must not eat that enum.
+    # DetailType is a code constant the API echoes; preserving the key keeps it real.
+    prefix = tmp / "qbo_prefix"
+    (prefix / "fixtures").mkdir(parents=True)
+    (prefix / "data.singer").write_text(
+        json.dumps(
+            {
+                "type": "RECORD",
+                "stream": "Bills",
+                "record": {"accountName": "Advertising", "billNumber": live_bill},
+            }
+        )
+        + "\n"
+    )
+    write_cassette(
+        prefix / "fixtures" / "vcr.yaml",
+        {
+            "interactions": [
+                {
+                    "request": {
+                        "uri": "https://example.com/v3/company/1/batch",
+                        "body": json.dumps(
+                            {
+                                "BatchItemRequest": [
+                                    {
+                                        "bId": "bid1",
+                                        "operation": "create",
+                                        "Bill": {
+                                            "Line": [
+                                                {
+                                                    "DetailType": "AccountBasedExpenseLineDetail",
+                                                    "AccountBasedExpenseLineDetail": {
+                                                        "AccountRef": {
+                                                            "name": "Advertising",
+                                                        }
+                                                    },
+                                                }
+                                            ]
+                                        },
+                                    }
+                                ]
+                            }
+                        ),
+                    },
+                    "response": {
+                        "body": {
+                            "string": json.dumps(
+                                {
+                                    "Account": {
+                                        "Name": "Advertising",
+                                        "AccountSubType": "AdvertisingPromotional",
+                                    },
+                                    "Line": {
+                                        "DetailType": "AccountBasedExpenseLineDetail",
+                                    },
+                                }
+                            )
+                        }
+                    },
+                }
+            ]
+        },
+    )
+    scrub_target_case(
+        prefix,
+        prefix / "fixtures" / "vcr.yaml",
+        preserve_keys={"Query", "bId", "AccountSubType", "DetailType"},
+        token_keys=set(),
+    )
+    prefix_record = json.loads((prefix / "data.singer").read_text().splitlines()[0])[
+        "record"
+    ]
+    prefix_cassette = load_cassette(prefix / "fixtures" / "vcr.yaml")
+    prefix_request = json.loads(prefix_cassette["interactions"][0]["request"]["body"])
+    prefix_response = json.loads(prefix_cassette["interactions"][0]["response"]["body"]["string"])
+    fake_account = prefix_record["accountName"]
+    assert fake_account != "Advertising"
+    assert prefix_request["BatchItemRequest"][0]["Bill"]["Line"][0]["DetailType"] == (
+        "AccountBasedExpenseLineDetail"
+    )
+    assert (
+        prefix_request["BatchItemRequest"][0]["Bill"]["Line"][0][
+            "AccountBasedExpenseLineDetail"
+        ]["AccountRef"]["name"]
+        == fake_account
+    )
+    assert prefix_response["Account"]["Name"] == fake_account
+    assert prefix_response["Account"]["AccountSubType"] == "AdvertisingPromotional"
+    assert prefix_response["Line"]["DetailType"] == "AccountBasedExpenseLineDetail"
+
+    # Fakes derive from the value, so a second pass on fresh input matches.
+    again = TargetValueScrubber(set(), set(), set())
+    again.collect({"someOtherName": "real@acme.com", "email": "real@acme.com"})
+    again.build()
+    assert again.scrub_json({"x": "real@acme.com"})["x"] == fake_email
+
+
 def _check_sanitize_round_trip(tmp: Path) -> None:
     tmp.mkdir(parents=True, exist_ok=True)
     cassette_path = tmp / "vcr.yaml"
@@ -748,6 +1073,7 @@ def main() -> None:
         _check_filter_response_headers(Path(tmp) / "filter_response_headers")
         _check_runner_uri_scrub(Path(tmp) / "runner_uri_scrub")
         _check_runner_response_scrub(Path(tmp) / "runner_response_scrub")
+        _check_target_value_scrub(Path(tmp) / "target_value_scrub")
         _check_etl_deterministic_scrub()
         _check_etl_pythonpath(Path(tmp) / "etl_pythonpath")
         _check_etl_compare_noops(Path(tmp) / "etl_compare_noop")

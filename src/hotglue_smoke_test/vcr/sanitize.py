@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -71,6 +72,38 @@ _LAT_FIELDS = {"latitude", "lat"}
 _LON_FIELDS = {"longitude", "lng", "lon"}
 _BIRTHDATE_FIELDS = {"birthdate", "dateofbirth", "dob"}
 # If the key isn't in a typed map above, fallback to scrubbing by value type.
+_TYPED_FIELDS = (
+    _EMAIL_FIELDS
+    | _PHONE_FIELDS
+    | _IP_FIELDS
+    | _FIRST_NAME_FIELDS
+    | _LAST_NAME_FIELDS
+    | _PERSON_NAME_FIELDS
+    | _COMPANY_NAME_FIELDS
+    | _STREET_FIELDS
+    | _CITY_FIELDS
+    | _POSTAL_FIELDS
+    | _REGION_FIELDS
+    | _LAT_FIELDS
+    | _LON_FIELDS
+    | _BIRTHDATE_FIELDS
+)
+
+
+def normalize_field(key: str) -> str:
+    """Field name as the typed generators see it (last dotted segment, no case/underscores)."""
+    return key.split(".")[-1].replace("_", "").lower()
+
+
+def is_typed_field(key: str) -> bool:
+    """True when the field name maps to a format-preserving generator (email, phone, …)."""
+    return normalize_field(key) in _TYPED_FIELDS
+
+
+def stable_seed(value: Any) -> int:
+    """Stable 31-bit seed from (type, value) for cross-process deterministic fakes."""
+    raw = f"{type(value).__name__}:{value!r}".encode()
+    return int(hashlib.sha256(raw).hexdigest()[:16], 16) % (2**31)
 
 # date / date-time strings — keep parseable shape (singer dateutil)
 _TEMPORAL_RULES: tuple[tuple[re.Pattern[str], Callable[[Any, re.Match[str]], str]], ...] = (
