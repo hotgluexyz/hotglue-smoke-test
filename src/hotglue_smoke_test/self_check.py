@@ -657,6 +657,69 @@ def _check_target_value_scrub(tmp: Path) -> None:
     assert fake_bill in qbo_query["Query"]
     assert live_bill not in qbo_query["Query"]
 
+    # QBO escapes apostrophes in Query SQL. The scrubbed name must land in that
+    # escaped form, or the replayed lookup body will not match the cassette.
+    apos = tmp / "qbo_apostrophe"
+    (apos / "fixtures").mkdir(parents=True)
+    live_vendor = "O'Brien Masonry"
+    (apos / "data.singer").write_text(
+        json.dumps(
+            {
+                "type": "RECORD",
+                "stream": "VendorCredits",
+                "record": {"vendorName": live_vendor},
+            }
+        )
+        + "\n"
+    )
+    write_cassette(
+        apos / "fixtures" / "vcr.yaml",
+        {
+            "interactions": [
+                {
+                    "request": {
+                        "uri": "https://example.com/v3/company/1/batch",
+                        "body": json.dumps(
+                            {
+                                "BatchItemRequest": [
+                                    {
+                                        "bId": "bid1",
+                                        "Query": (
+                                            "select Id, DisplayName, SyncToken from Vendor "
+                                            "where DisplayName in ('O\\'Brien Masonry') "
+                                            "STARTPOSITION 0 MAXRESULTS 100"
+                                        ),
+                                    }
+                                ]
+                            }
+                        ),
+                    },
+                    "response": {
+                        "body": {
+                            "string": json.dumps(
+                                {"Vendor": [{"Id": "1", "DisplayName": live_vendor}]}
+                            )
+                        }
+                    },
+                }
+            ]
+        },
+    )
+    scrub_target_case(
+        apos,
+        apos / "fixtures" / "vcr.yaml",
+        preserve_keys={"Query", "bId"},
+        token_keys=set(),
+    )
+    apos_name = json.loads((apos / "data.singer").read_text())["record"]["vendorName"]
+    apos_query = json.loads(
+        load_cassette(apos / "fixtures" / "vcr.yaml")["interactions"][0]["request"]["body"]
+    )["BatchItemRequest"][0]["Query"]
+    assert apos_name != live_vendor
+    assert apos_name.replace("'", "\\'") in apos_query
+    assert live_vendor not in apos_query
+    assert "O\\'Brien" not in apos_query
+
     # A singer name that is a prefix of a preserved enum must not eat that enum.
     # DetailType is a code constant the API echoes; preserving the key keeps it real.
     prefix = tmp / "qbo_prefix"

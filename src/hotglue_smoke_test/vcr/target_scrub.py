@@ -285,7 +285,13 @@ class TargetValueScrubber:
             return self.scrub_uri(text.strip())
         values = self._embedded_input if input_only else self._embedded
         for value in values:
-            text = _replace_bounded(text, value, self._map[value])
+            fake = self._map[value]
+            # QuickBooks escapes apostrophes before putting a name in Query SQL
+            # (O'Brien -> O\'Brien). The raw value is not a substring of that SQL.
+            escaped = value.replace("'", "\\'")
+            if escaped != value:
+                text = _replace_bounded(text, escaped, fake.replace("'", "\\'"))
+            text = _replace_bounded(text, value, fake)
         return text
 
     def scrub_uri(self, uri: str) -> str:
