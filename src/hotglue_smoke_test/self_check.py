@@ -573,6 +573,21 @@ def _check_target_value_scrub(tmp: Path) -> None:
     assert out["primaryContactRef"].endswith("@example.com")
     assert out["ownerId"] != "Jane Doe"
 
+    # Nested E.164 phoneNumber values are numeric-shaped but still scrubbed.
+    phones = TargetValueScrubber(set(), set(), set())
+    live_phone = "+18888774445"
+    phones.collect(
+        {"phoneNumbers": [{"type": "mobile", "phoneNumber": live_phone}]},
+        from_input=True,
+    )
+    phones.build()
+    scrubbed_phones = phones.scrub_json(
+        {"phoneNumbers": [{"type": "mobile", "phoneNumber": live_phone}]}
+    )
+    fake_phone = scrubbed_phones["phoneNumbers"][0]["phoneNumber"]
+    assert fake_phone.startswith("555-01") and fake_phone != live_phone
+    assert phones.scrub_json({"id": "4567"})["id"] == "4567"
+
     kept = TargetValueScrubber({"cursor"}, set(), set())
     kept.collect(
         {

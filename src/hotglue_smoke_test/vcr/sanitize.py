@@ -100,6 +100,11 @@ def is_typed_field(key: str) -> bool:
     return normalize_field(key) in _TYPED_FIELDS
 
 
+def is_phone_field(key: str) -> bool:
+    """True when the field name maps to the phone faker (phoneNumber, mobile, …)."""
+    return normalize_field(key) in _PHONE_FIELDS
+
+
 def stable_seed(value: Any) -> int:
     """Stable 31-bit seed from (type, value) for cross-process deterministic fakes."""
     raw = f"{type(value).__name__}:{value!r}".encode()
@@ -409,4 +414,3 @@ def sanitize_config_credentials(
         print("Save it to reuse on another test record")
         print("-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-")
     config_path.write_text(json.dumps(config, indent=4) + "\n")
-

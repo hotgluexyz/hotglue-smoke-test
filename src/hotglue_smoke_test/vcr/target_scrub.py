@@ -29,6 +29,7 @@ from urllib.parse import parse_qsl, quote, unquote, urlencode, urlsplit, urlunsp
 from faker import Faker
 
 from hotglue_smoke_test.vcr.sanitize import (
+    is_phone_field,
     is_typed_field,
     load_cassette,
     make_faker_replace_fn,
@@ -79,10 +80,21 @@ _STRUCTURAL_URI_PATH_SEGMENTS = frozenset(
 
 # Formats recognisable from the value, for when the field name says nothing useful
 # ("primaryContactRef" holding an email). Maps to the generator's field name.
+# E.164-style numbers match _NUMERIC_RE but are PII when the field or shape says phone.
+_PHONE_VALUE_RE = re.compile(r"^\+[1-9]\d{6,14}$")
+
 _VALUE_FORMATS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$"), "email"),
     (re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$"), "ip"),
+    (_PHONE_VALUE_RE, "phonenumber"),
 )
+
+
+def _numeric_is_structural(key: str, text: str) -> bool:
+    """True when a numeric-looking string should stay real (ids, amounts, not phones)."""
+    if not _NUMERIC_RE.match(text):
+        return False
+    return not (is_phone_field(key) or _PHONE_VALUE_RE.match(text))
 
 # Shorter values are too collision-prone to swap inside a larger string, unless
 # they are reused across surfaces (then they are references and must stay consistent).
@@ -198,7 +210,7 @@ class TargetValueScrubber:
         if text.lower() in _BOOLEAN_VALUES or _ALREADY_FAKE_RE.match(text):
             return False
         return not (
-            _NUMERIC_RE.match(text)
+            _numeric_is_structural(key, text)
             or _UUID_RE.match(text)
             or _SCHEME_RE.match(text)
             or _TEMPORAL_RE.match(text)
