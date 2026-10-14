@@ -398,7 +398,10 @@ def _body_string(container: dict) -> str | None:
     if isinstance(body, dict):
         body = body.get("string")
     if isinstance(body, bytes):
-        return body.decode("utf-8", errors="replace")
+        try:
+            return body.decode("utf-8")
+        except UnicodeDecodeError:
+            return None
     return body if isinstance(body, str) and body.strip() else None
 
 
