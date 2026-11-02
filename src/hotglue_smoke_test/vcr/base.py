@@ -12,6 +12,7 @@ from freezegun import freeze_time
 from hotglue_smoke_test.vcr.sanitize import (
     sanitize_cassette_file,
     sanitize_config_credentials,
+    scrub_request_body,
     scrub_response_body as sanitize_response_body,
 )
 
@@ -134,13 +135,14 @@ class VCRBaseTestRunner(ABC):
         runner.run_test()
 
     def sanitize_cassette(self):
-        """Default-scrub response JSON leaves; PRESERVE_KEYS stay real. Tokens scrubbed after."""
+        """Default-scrub JSON/XML response leaves; PRESERVE_KEYS stay real. Request TOKEN_KEYS redacted."""
         faker = Faker()
         Faker.seed(hash(self.test_case) & 0xFFFFFFFF)
         cache = {}
         sanitize_cassette_file(
             self.vcr_cassette_path,
             scrub_response=lambda body: self.scrub_response_body(body, faker, cache),
+            scrub_request=lambda body: scrub_request_body(body, set(self.TOKEN_KEYS)),
             scrub_uri=self.scrub_uri,
         )
 
