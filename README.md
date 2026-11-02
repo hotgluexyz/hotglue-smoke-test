@@ -210,7 +210,7 @@ Connector `__smoke-tests__/record-vcr.py`:
 from hotglue_smoke_test.vcr.tap import VCRTapTestRunner
 ```
 
-Override `sanitize_cassette()` for connector-specific PII rules. Default base scrub redacts `TOKEN_KEYS` and fakes other leaves in JSON **and** XML response bodies; XML/JSON request bodies only redact `TOKEN_KEYS`. HTML/plain text responses still raise. Set tap `PRESERVE_KEYS` for any response keys the tap feeds into the next request or state.
+Override `scrub_response_body()` for connector-specific response-body rules, or `scrub_uri()` for PII in request paths or query strings. Default base scrub redacts `TOKEN_KEYS` and fakes other leaves in JSON **and** XML response bodies; XML/JSON request bodies only redact `TOKEN_KEYS`. HTML/plain text responses still raise. Set tap `PRESERVE_KEYS` for any response keys the tap feeds into the next request or state.
 
 ETL `__smoke-tests__/record-etl.py` subclasses `ETLSmokeRunner` (mirror of
 `VCRTapTestRunner`): override `should_scrub_key` when JSON dict keys must be scrubbed;
