@@ -13,7 +13,7 @@ from hotglue_smoke_test.vcr.sanitize import (
     sanitize_cassette_file,
     sanitize_config_credentials,
     scrub_request_body,
-    scrub_response_body,
+    scrub_response_body as sanitize_response_body,
 )
 
 
@@ -139,14 +139,21 @@ class VCRBaseTestRunner(ABC):
         faker = Faker()
         Faker.seed(hash(self.test_case) & 0xFFFFFFFF)
         cache = {}
-        token_keys = set(self.TOKEN_KEYS)
         sanitize_cassette_file(
             self.vcr_cassette_path,
-            scrub_response=lambda body: scrub_response_body(
-                body, set(self.PRESERVE_KEYS), faker, cache, token_keys
-            ),
-            scrub_request=lambda body: scrub_request_body(body, token_keys),
+            scrub_response=lambda body: self.scrub_response_body(body, faker, cache),
+            scrub_request=lambda body: scrub_request_body(body, set(self.TOKEN_KEYS)),
+            scrub_uri=self.scrub_uri,
         )
+
+    def scrub_response_body(self, body: str, faker: Faker, cache: dict) -> str:
+        """Scrub a cassette response body. Override for connector-specific response rules."""
+        return sanitize_response_body(
+            body, set(self.PRESERVE_KEYS), faker, cache, set(self.TOKEN_KEYS)
+        )
+    def scrub_uri(self, uri: str) -> str:
+        """Scrub a cassette request URI. Override for connector-specific path/query PII."""
+        return uri
 
     def before_record_response(self, response):
         """Drop FILTER_HEADERS from the response before writing the cassette."""
