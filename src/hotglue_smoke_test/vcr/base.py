@@ -151,6 +151,7 @@ class VCRBaseTestRunner(ABC):
         return sanitize_response_body(
             body, set(self.PRESERVE_KEYS), faker, cache, set(self.TOKEN_KEYS)
         )
+
     def scrub_uri(self, uri: str) -> str:
         """Scrub a cassette request URI. Override for connector-specific path/query PII."""
         return uri

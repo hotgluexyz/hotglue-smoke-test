@@ -46,7 +46,12 @@ hotglue-smoke-test generate orders_test   # replay → expected_output/data.sing
 hotglue-smoke-test run orders_test        # replay → compare
 ```
 
-`module` + `launch` are required. Override `sanitize_cassette()` only when the default token scrub is not enough.
+`module` + `launch` are required. Override `scrub_response_body()` for connector-specific response-body rules, or `scrub_uri()` to scrub PII in request paths or query strings:
+
+```python
+def scrub_uri(self, uri: str) -> str:
+    return uri.replace("person@example.com", "fake@example.com")
+```
 
 ### ETL
 
