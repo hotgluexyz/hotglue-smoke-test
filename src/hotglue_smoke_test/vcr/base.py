@@ -54,6 +54,17 @@ class VCRBaseTestRunner(ABC):
         self.test_config_path = os.path.join(self.test_case_path, "test-config.json")
         self.vcr_cassette_path = os.path.join(self.test_case_path, "fixtures", "vcr.yaml")
 
+        self.test_config = {}
+        if os.path.exists(self.test_config_path):
+            with open(self.test_config_path) as config_file:
+                self.test_config = json.load(config_file)
+
+        # Instance unions so overrides that read self.PRESERVE_KEYS / TOKEN_KEYS /
+        # FILTER_HEADERS (e.g. custom vcr_use_cassette) pick up case extras.
+        self.PRESERVE_KEYS = set(self.PRESERVE_KEYS) | set(self.test_config.get("preserve_keys") or ())
+        self.TOKEN_KEYS = list(dict.fromkeys([*self.TOKEN_KEYS, *(self.test_config.get("token_keys") or ())]))
+        self.FILTER_HEADERS = list(dict.fromkeys([*self.FILTER_HEADERS, *(self.test_config.get("filter_headers") or ())]))
+
         self.mode = os.environ.get("SMOKE_TEST_MODE", "run")
         self.output_file_path = self._resolve_output_path()
 
@@ -74,10 +85,7 @@ class VCRBaseTestRunner(ABC):
             if not os.path.exists(file_path):
                 raise FileNotFoundError(f"Missing required file: {file_path}")
 
-        test_config = {}
-        if os.path.exists(self.test_config_path):
-            with open(self.test_config_path) as config_file:
-                test_config = json.load(config_file)
+        test_config = self.test_config
 
         if "ignore_streams" in test_config:
             os.environ["IGNORE_STREAMS"] = ",".join(test_config["ignore_streams"])
