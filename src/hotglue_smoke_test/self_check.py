@@ -383,6 +383,60 @@ def _check_runner_uri_scrub(tmp: Path) -> None:
     assert cassette["interactions"][0]["request"]["uri"].endswith("fake@example.com")
 
 
+def _check_case_scrub_extras(tmp: Path) -> None:
+    """Case test-config.json unions onto instance lists and flows into scrub."""
+    case = tmp / "orders_test"
+    case.mkdir(parents=True)
+    (case / "test-config.json").write_text(
+        json.dumps(
+            {
+                "preserve_keys": ["keepMe"],
+                "token_keys": ["vendor_secret"],
+                "filter_headers": ["X-Case-Secret"],
+            }
+        )
+        + "\n"
+    )
+
+    class _CaseExtras(_StubVCRRunner):
+        PRESERVE_KEYS = {"id"}
+
+    runner = _CaseExtras("orders_test", str(tmp))
+    assert runner.PRESERVE_KEYS == {"id", "keepMe"}
+    assert "vendor_secret" in runner.TOKEN_KEYS
+    assert "X-Case-Secret" in runner.FILTER_HEADERS
+
+    cassette_path = Path(runner.vcr_cassette_path)
+    cassette_path.parent.mkdir(parents=True, exist_ok=True)
+    write_cassette(
+        cassette_path,
+        {
+            "interactions": [
+                {
+                    "request": {
+                        "uri": "https://example.com/api",
+                        "body": {"string": json.dumps({"vendor_secret": "live-secret"})},
+                    },
+                    "response": {
+                        "body": {
+                            "string": json.dumps(
+                                {"keepMe": "literal-value", "email": "live@example.com"}
+                            )
+                        }
+                    },
+                }
+            ]
+        },
+    )
+    runner.sanitize_cassette()
+    cassette = load_cassette(cassette_path)
+    scrubbed = json.loads(cassette["interactions"][0]["response"]["body"]["string"])
+    assert scrubbed["keepMe"] == "literal-value"
+    assert scrubbed["email"] != "live@example.com"
+    req = json.loads(cassette["interactions"][0]["request"]["body"]["string"])
+    assert req["vendor_secret"] == "liv***"
+
+
 def _check_runner_response_scrub(tmp: Path) -> None:
     class _ResponseScrubRunner(_StubVCRRunner):
         def scrub_response_body(self, body: str, faker: Faker, cache: dict) -> str:
@@ -1282,6 +1336,7 @@ def main() -> None:
 
         _check_sanitize_round_trip(Path(tmp) / "sanitize_check")
         _check_filter_response_headers(Path(tmp) / "filter_response_headers")
+        _check_case_scrub_extras(Path(tmp) / "case_scrub_extras")
         _check_runner_uri_scrub(Path(tmp) / "runner_uri_scrub")
         _check_runner_response_scrub(Path(tmp) / "runner_response_scrub")
         _check_target_value_scrub(Path(tmp) / "target_value_scrub")

@@ -14,6 +14,7 @@ class VCRTargetTestRunner(VCRBaseTestRunner):
     def __init__(self, test_case: str, script_dir: str):
         self.required_files = ["config.json", "data.singer"]
         super().__init__(test_case, script_dir)
+        self.PRESERVE_VALUES = set(self.PRESERVE_VALUES) | set(self.test_config.get("preserve_values") or ())
 
     def sanitize_cassette(self):
         """Scrub data.singer and the cassette together with one shared value map."""

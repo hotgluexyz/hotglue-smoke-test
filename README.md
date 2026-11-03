@@ -298,6 +298,18 @@ from hotglue_smoke_test.vcr.tap import VCRTapTestRunner
 
 Override `scrub_response_body()` for connector-specific response-body rules, or `scrub_uri()` for PII in request paths or query strings. Default base scrub redacts `TOKEN_KEYS` and fakes other leaves in JSON **and** XML response bodies; XML/JSON request bodies only redact `TOKEN_KEYS`. HTML/plain text responses still raise. Set tap `PRESERVE_KEYS` for any response keys the tap feeds into the next request or state.
 
+Per-case scrub extras go in `<case>/test-config.json` and are unioned onto the runner class lists (one stream can add keys without widening `record-vcr.py` / `record-etl.py`):
+
+| Key | Tap | Target | ETL |
+|-----|-----|--------|-----|
+| `preserve_keys` | yes | yes | yes |
+| `token_keys` | yes | yes | yes |
+| `filter_headers` | yes | yes | — |
+| `preserve_values` | — | yes | yes |
+| `preserve_columns` | — | — | yes |
+
+Tap/target merge onto the instance’s `PRESERVE_*` / `TOKEN_KEYS` / `FILTER_HEADERS` at init, so existing `record-vcr.py` overrides that read those attributes (custom `vcr_use_cassette`, `scrub_response_body`, …) pick up case extras with no changes. ETL merges the same way in `_preserve_config` when scrubbing fixtures.
+
 ETL `__smoke-tests__/record-etl.py` subclasses `ETLSmokeRunner` (mirror of
 `VCRTapTestRunner`): override `should_scrub_key` when JSON dict keys must be scrubbed;
 override `split_composite_value` for composite values (return an odd-length
@@ -306,7 +318,7 @@ scrubbed, odd ones stay as separators); override `SKIP_SCRUB_NAMES` to scrub or 
 schema files (`catalog.json` / `selectedTables.json` / …); override `after_etl` when needed; end with
 `YourClass.main()` under `if __name__ == "__main__"`.
 One Runner serves many `*_test` case folders. Optional per-case `flow`, `job_type`,
-and `tenant` overrides go in `<case>/test-config.json`; unset values are omitted so
+and `tenant` overrides also go in `<case>/test-config.json`; unset values are omitted so
 `etl.py` keeps its defaults. CLI shells out to `record-etl.py` with
 `SMOKE_TEST_MODE` the same way it shells out to `record-vcr.py`.
 
