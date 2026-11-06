@@ -250,7 +250,7 @@ hotglue-smoke-test run
 hotglue-smoke-test run orders_test
 ```
 
-**Tap:** `record` scrubs by default after the live HTTP capture (JSON **or** XML cassette response bodies + `TOKEN_KEYS` in request bodies when they are JSON/XML + connector `record-vcr.py` rules). Scrubbed PII is intentionally marked so reviewers/scanners can tell it from live data: `Fake-` on names/addresses, `555-01xx` phones, `fake.*@example.com` emails, `203.0.113.x` IPs (untyped strings use `-Fallback-scrubbed-…`).
+**Tap:** `record` scrubs by default after the live HTTP capture (JSON **or** XML cassette response bodies + `TOKEN_KEYS` in request bodies when they are JSON/XML or URL-encoded forms + connector `record-vcr.py` rules). Scrubbed PII is intentionally marked so reviewers/scanners can tell it from live data: `Fake-` on names/addresses, `555-01xx` phones, `fake.*@example.com` emails, `203.0.113.x` IPs (untyped strings use `-Fallback-scrubbed-…`).
 
 **Target:** `record` scrubs the case `data.singer` **in place** together with the cassette, using one shared value map, so the scrubbed input still produces the recorded requests on replay. Commit the scrubbed `data.singer` with the cassette.
 
@@ -296,7 +296,7 @@ Connector `__smoke-tests__/record-vcr.py`:
 from hotglue_smoke_test.vcr.tap import VCRTapTestRunner
 ```
 
-Override `scrub_response_body()` for connector-specific response-body rules, or `scrub_uri()` for PII in request paths or query strings. Default base scrub redacts `TOKEN_KEYS` and fakes other leaves in JSON **and** XML response bodies; XML/JSON request bodies only redact `TOKEN_KEYS`. HTML/plain text responses still raise. Set tap `PRESERVE_KEYS` for any response keys the tap feeds into the next request or state.
+Override `scrub_response_body()` for connector-specific response-body rules, or `scrub_uri()` for PII in request paths or query strings. Default base scrub redacts `TOKEN_KEYS` and fakes other leaves in JSON **and** XML response bodies; JSON/XML and URL-encoded form request bodies only redact `TOKEN_KEYS`. Form scrubbing preserves field order, repeated fields, and blank values, and matches credential names without regard to case. Unsupported request/response bodies still raise. Set tap `PRESERVE_KEYS` for any response keys the tap feeds into the next request or state.
 
 Per-case scrub extras go in `<case>/test-config.json` and are unioned onto the runner class lists (one stream can add keys without widening `record-vcr.py` / `record-etl.py`):
 

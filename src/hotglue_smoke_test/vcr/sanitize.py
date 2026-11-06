@@ -7,6 +7,7 @@ import json
 import re
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import parse_qsl, urlencode
 
 import xmltodict
 import yaml
@@ -384,11 +385,24 @@ def scrub_response_body(
 
 
 def scrub_request_body(body: str, token_keys: set[str]) -> str:
-    """Redact TOKEN_KEYS in XML/JSON request bodies; leave opaque bodies unchanged."""
+    """Redact TOKEN_KEYS in JSON, XML, or flat URL-encoded request bodies."""
     parsed = _parse_body(body)
     if parsed is None:
+        try:
+            fields = parse_qsl(
+                body, keep_blank_values=True, strict_parsing=True, errors="strict"
+            )
+        except ValueError:
+            fields = []
+        if fields and all(re.fullmatch(r"[\w.-]+", key) for key, _ in fields):
+            keys_lower = {key.lower() for key in token_keys}
+            return urlencode([
+                (key, redact_credential(value) if key.lower() in keys_lower else value)
+                for key, value in fields
+            ])
         raise NotImplementedError(
-            "VCR request body is not a valid JSON or XML; refusing to leave HTML/plain text unscrubbed"
+            "VCR request body is not valid JSON, XML, or URL-encoded form data; "
+            "refusing to leave unsupported bodies unscrubbed"
         )
     data, kind = parsed
     return _dump_body(

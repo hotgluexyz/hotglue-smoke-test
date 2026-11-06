@@ -8,7 +8,7 @@ import re
 import shutil
 import tempfile
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import parse_qsl, quote, urlencode
 
 import xmltodict
 from faker import Faker
@@ -381,6 +381,66 @@ def _check_runner_uri_scrub(tmp: Path) -> None:
 
     cassette = load_cassette(cassette_path)
     assert cassette["interactions"][0]["request"]["uri"].endswith("fake@example.com")
+
+
+def _check_form_request_scrub(tmp: Path) -> None:
+    fields = [
+        ("client_id", "client-example"),
+        ("scope", "read write"),
+        ("grant_type", "refresh_token"),
+        ("REFRESH_TOKEN", "refresh+example&value=123"),
+        ("client_secret", "secret-example"),
+        ("client_secret", "second-example"),
+        ("password", ""),
+        ("redirect_uri", "https://example.com/callback?x=a+b&y=1"),
+        ("vendor_secret", "vendor-example"),
+    ]
+    body = urlencode(fields)
+    expected = [
+        ("client_id", "cli***"),
+        ("scope", "read write"),
+        ("grant_type", "refresh_token"),
+        ("REFRESH_TOKEN", "ref***"),
+        ("client_secret", "sec***"),
+        ("client_secret", "sec***"),
+        ("password", ""),
+        ("redirect_uri", "https://example.com/callback?x=a+b&y=1"),
+        ("vendor_secret", "ven***"),
+    ]
+    token_keys = {*VCRBaseTestRunner.TOKEN_KEYS, "vendor_secret"}
+    assert parse_qsl(scrub_request_body(body, token_keys), keep_blank_values=True) == expected
+    # Form detection does not depend on grant_type being present or first.
+    assert parse_qsl(scrub_request_body("password=example&scope=read", token_keys)) == [
+        ("password", "exa***"), ("scope", "read")
+    ]
+    for unsupported in (
+        "plain text", '<html name="example">', "token=example&broken", "=example", "token=%FF"
+    ):
+        try:
+            scrub_request_body(unsupported, token_keys)
+        except NotImplementedError:
+            pass
+        else:
+            raise AssertionError("unsupported bodies must not pass through unscrubbed")
+
+    case = tmp / "case_test"
+    case.mkdir(parents=True)
+    (case / "test-config.json").write_text('{"token_keys": ["vendor_secret"]}')
+    runner = _StubVCRRunner("case_test", str(tmp))
+    cassette_path = Path(runner.vcr_cassette_path)
+    cassette_path.parent.mkdir(parents=True)
+    write_cassette(
+        cassette_path,
+        {"interactions": [
+            {"request": {"body": value}, "response": {}}
+            for value in (body, body.encode(), {"string": body})
+        ]},
+    )
+    runner.sanitize_cassette()
+    requests = [item["request"] for item in load_cassette(cassette_path)["interactions"]]
+    assert parse_qsl(requests[0]["body"], keep_blank_values=True) == expected
+    assert parse_qsl(requests[1]["body"].decode(), keep_blank_values=True) == expected
+    assert parse_qsl(requests[2]["body"]["string"], keep_blank_values=True) == expected
 
 
 def _check_case_scrub_extras(tmp: Path) -> None:
@@ -1339,6 +1399,7 @@ def main() -> None:
         _check_case_scrub_extras(Path(tmp) / "case_scrub_extras")
         _check_runner_uri_scrub(Path(tmp) / "runner_uri_scrub")
         _check_runner_response_scrub(Path(tmp) / "runner_response_scrub")
+        _check_form_request_scrub(Path(tmp) / "form_request_scrub")
         _check_target_value_scrub(Path(tmp) / "target_value_scrub")
         _check_etl_deterministic_scrub()
         _check_etl_pythonpath(Path(tmp) / "etl_pythonpath")
