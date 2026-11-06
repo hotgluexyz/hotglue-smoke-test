@@ -153,20 +153,26 @@ def redact_credential(value: Any) -> Any:
     return value
 
 
-def scrub_tokens_in_json(data: Any, token_keys: set[str]) -> Any:
+def scrub_tokens_in_json(data: Any, token_keys: set[str], *, xml_fields: bool = False) -> Any:
     """Replace credential values (any depth) with a stable prefix*** placeholder."""
     if isinstance(data, dict):
         keys_lower = {k.lower() for k in token_keys}
+        field_name = data.get("@name") if xml_fields else None
         out = {}
         for key, value in data.items():
+            field_key = field_name if key == "@value" and isinstance(field_name, str) else key
             key_lower = key.lower()
-            if key_lower in keys_lower or (key.startswith("@") and key_lower[1:] in keys_lower):
+            if (
+                key_lower in keys_lower
+                or (key.startswith("@") and key_lower[1:] in keys_lower)
+                or field_key.lower() in keys_lower
+            ):
                 out[key] = redact_credential(value)
             else:
-                out[key] = scrub_tokens_in_json(value, token_keys)
+                out[key] = scrub_tokens_in_json(value, token_keys, xml_fields=xml_fields)
         return out
     if isinstance(data, list):
-        return [scrub_tokens_in_json(item, token_keys) for item in data]
+        return [scrub_tokens_in_json(item, token_keys, xml_fields=xml_fields) for item in data]
     return data
 
 
@@ -175,20 +181,29 @@ def scrub_json_tree(
     *,
     preserve_keys: set[str],
     replace_fn: Callable[[str, Any], Any],
+    xml_fields: bool = False,
 ) -> Any:
     """Recursively scrub JSON leaves; preserve_keys keep their values as-is."""
     if isinstance(obj, dict):
         keys_lower = {k.lower() for k in preserve_keys}
+        field_name = obj.get("@name") if xml_fields and "@value" in obj else None
         out = {}
         for key, value in obj.items():
+            field_key = field_name if key == "@value" and isinstance(field_name, str) else key
             kl = key.lower()
-            if kl in keys_lower or (key.startswith("@") and kl[1:] in keys_lower):
+            if (
+                isinstance(field_name, str) and key in {"@name", "@id"} and value == field_name
+                or kl in keys_lower
+                or (key.startswith("@") and kl[1:] in keys_lower)
+                or field_key.lower() in keys_lower
+            ):
                 out[key] = value
             elif isinstance(value, dict):
                 out[key] = scrub_json_tree(
                     value,
                     preserve_keys=preserve_keys,
                     replace_fn=replace_fn,
+                    xml_fields=xml_fields,
                 )
             elif isinstance(value, list):
                 out[key] = _scrub_list(
@@ -196,9 +211,10 @@ def scrub_json_tree(
                     key=key,
                     preserve_keys=preserve_keys,
                     replace_fn=replace_fn,
+                    xml_fields=xml_fields,
                 )
             else:
-                out[key] = replace_fn(key, value)
+                out[key] = replace_fn(field_key, value)
         return out
     if isinstance(obj, list):
         return [
@@ -206,6 +222,7 @@ def scrub_json_tree(
                 item,
                 preserve_keys=preserve_keys,
                 replace_fn=replace_fn,
+                xml_fields=xml_fields,
             )
             for item in obj
         ]
@@ -218,6 +235,7 @@ def _scrub_list(
     key: str,
     preserve_keys: set[str],
     replace_fn: Callable[[str, Any], Any],
+    xml_fields: bool = False,
 ) -> list:
     out = []
     for item in values:
@@ -227,6 +245,7 @@ def _scrub_list(
                     item,
                     preserve_keys=preserve_keys,
                     replace_fn=replace_fn,
+                    xml_fields=xml_fields,
                 )
             )
         elif isinstance(item, list):
@@ -236,6 +255,7 @@ def _scrub_list(
                     key=key,
                     preserve_keys=preserve_keys,
                     replace_fn=replace_fn,
+                    xml_fields=xml_fields,
                 )
             )
         else:
@@ -336,12 +356,13 @@ def _parse_body(body: str) -> tuple[Any, str] | None:
         return json.loads(body), "json"
     except json.JSONDecodeError:
         pass
-    if body.lstrip().startswith("<?xml"):
-        try:
-            return xmltodict.parse(body), "xml"
-        except Exception:
-            return None
-    return None
+    try:
+        data = xmltodict.parse(body)
+    except Exception:
+        return None
+    if "html" in {key.lower() for key in data}:
+        return None
+    return data, "xml"
 
 
 def _dump_body(data: Any, kind: str) -> str:
@@ -354,13 +375,16 @@ def scrub_parsed_body(
     faker,
     cache: dict,
     token_keys: set[str],
+    *,
+    xml_fields: bool = False,
 ) -> Any:
     """Redact tokens then default-scrub leaves; preserve_keys / token_keys stay as placeholders or real."""
-    data = scrub_tokens_in_json(data, token_keys)
+    data = scrub_tokens_in_json(data, token_keys, xml_fields=xml_fields)
     return scrub_json_tree(
         data,
         preserve_keys=preserve_keys | token_keys,
         replace_fn=make_faker_replace_fn(faker, cache),
+        xml_fields=xml_fields,
     )
 
 
@@ -379,7 +403,9 @@ def scrub_response_body(
         )
     data, kind = parsed
     return _dump_body(
-        scrub_parsed_body(data, preserve_keys, faker, cache, token_keys),
+        scrub_parsed_body(
+            data, preserve_keys, faker, cache, token_keys, xml_fields=kind == "xml"
+        ),
         kind,
     )
 
@@ -406,7 +432,7 @@ def scrub_request_body(body: str, token_keys: set[str]) -> str:
         )
     data, kind = parsed
     return _dump_body(
-        scrub_tokens_in_json(data, token_keys), 
+        scrub_tokens_in_json(data, token_keys, xml_fields=kind == "xml"),
         kind
     )
 

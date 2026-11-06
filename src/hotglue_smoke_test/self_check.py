@@ -285,6 +285,61 @@ class _StubVCRRunner(VCRBaseTestRunner):
         return []
 
 
+def _check_threaded_requests(tmp: Path) -> None:
+    try:
+        from requests.sessions import Session
+    except ImportError:
+        return  # requests is optional; tox installs it for this check.
+
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier, Lock
+    from time import sleep
+    from unittest.mock import patch
+
+    workers = 8
+    barrier = Barrier(workers)
+    counter_lock = Lock()
+    active = maximum = 0
+
+    def fake_send(session, request, **kwargs):
+        nonlocal active, maximum
+        if request == "redirect":
+            return session.send("redirected")
+        with counter_lock:
+            active += 1
+            maximum = max(maximum, active)
+        sleep(0.01)
+        with counter_lock:
+            active -= 1
+        return request
+
+    def request(index):
+        barrier.wait(timeout=5)
+        return Session().send(index)
+
+    class _ThreadedRunner(_StubVCRRunner):
+        def run_launch(self):
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                assert list(pool.map(request, range(workers))) == list(range(workers))
+            # Requests follows redirects through a nested Session.send call.
+            assert Session().send("redirect") == "redirected"
+
+    with patch.dict(os.environ, {"SMOKE_TEST_MODE": "run"}):
+        runner = _ThreadedRunner("case_test", str(tmp))
+        with patch.object(Session, "send", fake_send):
+            runner.run_test()
+            assert maximum == 1, "Concurrent sends can bypass VCR's HTTP patches"
+            assert Session.send is fake_send
+            with patch.object(runner, "run_launch", side_effect=ValueError("launch failed")):
+                try:
+                    runner.run_test()
+                except ValueError as exc:
+                    assert str(exc) == "launch failed"
+                else:
+                    raise AssertionError("expected launch failure")
+            assert Session.send is fake_send, "Session.send must be restored after failure"
+
+
 def _check_filter_response_headers(tmp: Path) -> None:
     runner = _StubVCRRunner("case_test", str(tmp))
 
@@ -948,6 +1003,45 @@ def _check_target_value_scrub(tmp: Path) -> None:
     assert again.scrub_json({"x": "real@acme.com"})["x"] == fake_email
 
 
+def _check_named_xml_fields() -> None:
+    body = (
+        '<result><record><field name="email" id="email" value="live@example.com"/>'
+        '<field name="internal_modified_date" id="internal_modified_date" '
+        'value="10/2/2026 12:58:52 PM"/>'
+        '<field name="password" id="password" value="secret-password"/>'
+        '<field name="notes" id="private-id" value=""/></record></result>'
+    )
+    preserve = {"internal_modified_date", "password"}
+    for prefix in ("", '<?xml version="1.0"?>', "\ufeff"):
+        out = xmltodict.parse(scrub_response_body(prefix + body, preserve, Faker(), {}, {"password"}))
+        fields = out["result"]["record"]["field"]
+        assert [f["@name"] for f in fields] == ["email", "internal_modified_date", "password", "notes"]
+        assert [f["@id"] for f in fields[:3]] == ["email", "internal_modified_date", "password"]
+        assert fields[0]["@value"].startswith("fake.")
+        assert fields[0]["@value"].endswith("@example.com")
+        assert fields[0]["@value"] != "live@example.com"
+        assert fields[1]["@value"] == "10/2/2026 12:58:52 PM"
+        assert fields[2]["@value"] == "sec***", "tokens override preservation"
+        assert fields[3]["@id"] != "private-id"
+        assert fields[3]["@value"] == ""
+
+    # Existing raw attribute allowlists and token names still work.
+    out = xmltodict.parse(scrub_response_body(body, {"@value"}, Faker(), {}, {"password"}))
+    fields = out["result"]["record"]["field"]
+    assert fields[0]["@value"] == "live@example.com"
+    assert fields[2]["@value"] == "sec***"
+    single = '<result><field name="password" value="secret-password"/></result>'
+    assert xmltodict.parse(scrub_request_body(single, {"password"}))["result"]["field"]["@value"] == "sec***"
+    assert xmltodict.parse(scrub_request_body(single, {"value"}))["result"]["field"]["@value"] == "sec***"
+
+    # Attribute-like JSON keys keep their existing meaning; XML rules are opt-in.
+    payload = {"@name": "email", "@id": "email", "@value": "live@example.com"}
+    out = json.loads(scrub_response_body(json.dumps(payload), {"@name", "@id"}, Faker(), {}, set()))
+    assert out["@name"] == "email" and out["@id"] == "email"
+    assert out["@value"].startswith("-Fallback-scrubbed-")
+    assert json.loads(scrub_request_body(json.dumps(payload), {"email"})) == payload
+
+
 def _check_sanitize_round_trip(tmp: Path) -> None:
     tmp.mkdir(parents=True, exist_ok=True)
     cassette_path = tmp / "vcr.yaml"
@@ -1395,7 +1489,9 @@ def main() -> None:
         assert (mapping_runtime / "mapping.json").read_text() == '{"source": true}\n'
 
         _check_sanitize_round_trip(Path(tmp) / "sanitize_check")
+        _check_named_xml_fields()
         _check_filter_response_headers(Path(tmp) / "filter_response_headers")
+        _check_threaded_requests(Path(tmp) / "threaded_requests")
         _check_case_scrub_extras(Path(tmp) / "case_scrub_extras")
         _check_runner_uri_scrub(Path(tmp) / "runner_uri_scrub")
         _check_runner_response_scrub(Path(tmp) / "runner_response_scrub")

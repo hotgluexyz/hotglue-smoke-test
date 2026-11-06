@@ -3,7 +3,7 @@
 from hotglue_smoke_test.etl import ETLSmokeRunner
 from hotglue_smoke_test.vcr import VCRTapTestRunner, VCRTargetTestRunner
 
-__version__ = "1.1.7"
+__version__ = "1.1.8"
 
 __all__ = [
     "ETLSmokeRunner",
