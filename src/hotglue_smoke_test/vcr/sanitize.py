@@ -360,8 +360,15 @@ def _parse_body(body: str) -> tuple[Any, str] | None:
         data = xmltodict.parse(body)
     except Exception:
         return None
-    if "html" in {key.rsplit(":", 1)[-1].lower() for key in data}:
-        return None
+    for key, value in data.items():
+        prefix, separator, local = key.rpartition(":")
+        if key.lower() == "html" or (
+            separator
+            and local.lower() == "html"
+            and isinstance(value, dict)
+            and value.get(f"@xmlns:{prefix}") == "http://www.w3.org/1999/xhtml"
+        ):
+            return None
     return data, "xml"
 
 

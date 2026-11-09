@@ -1023,13 +1023,14 @@ def _check_xml_body_roots() -> None:
                 else:
                     raise AssertionError("XHTML bodies must be rejected regardless of prefix")
 
-        body = (
-            '<api:response xmlns:api="urn:example:api">'
-            '<password>secret-password</password></api:response>'
-        )
-        out = xmltodict.parse(scrub(body))["api:response"]
-        assert out["@xmlns:api"] == "urn:example:api"
-        assert out["password"] == "sec***"
+        for root in ("api:response", "api:html"):
+            body = (
+                f'<{root} xmlns:api="urn:example:api">'
+                f'<password>secret-password</password></{root}>'
+            )
+            out = xmltodict.parse(scrub(body))[root]
+            assert out["@xmlns:api"] == "urn:example:api"
+            assert out["password"] == "sec***"
 
 
 def _check_named_xml_fields() -> None:
