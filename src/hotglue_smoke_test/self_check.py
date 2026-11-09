@@ -1003,6 +1003,35 @@ def _check_target_value_scrub(tmp: Path) -> None:
     assert again.scrub_json({"x": "real@acme.com"})["x"] == fake_email
 
 
+def _check_xml_body_roots() -> None:
+    for scrub in (
+        lambda body: scrub_request_body(body, {"password"}),
+        lambda body: scrub_response_body(body, {"@xmlns:api"}, Faker(), {}, {"password"}),
+    ):
+        for prefix in ("", '<?xml version="1.0"?>'):
+            for namespace_prefix in ("", "xh:", "custom:"):
+                xmlns = "xmlns:" + namespace_prefix[:-1] if namespace_prefix else "xmlns"
+                body = (
+                    f'<{namespace_prefix}html {xmlns}="http://www.w3.org/1999/xhtml">'
+                    f'<{namespace_prefix}body>example</{namespace_prefix}body>'
+                    f'</{namespace_prefix}html>'
+                )
+                try:
+                    scrub(prefix + body)
+                except NotImplementedError:
+                    pass
+                else:
+                    raise AssertionError("XHTML bodies must be rejected regardless of prefix")
+
+        body = (
+            '<api:response xmlns:api="urn:example:api">'
+            '<password>secret-password</password></api:response>'
+        )
+        out = xmltodict.parse(scrub(body))["api:response"]
+        assert out["@xmlns:api"] == "urn:example:api"
+        assert out["password"] == "sec***"
+
+
 def _check_named_xml_fields() -> None:
     body = (
         '<result><record><field name="email" id="email" value="live@example.com"/>'
@@ -1489,6 +1518,7 @@ def main() -> None:
         assert (mapping_runtime / "mapping.json").read_text() == '{"source": true}\n'
 
         _check_sanitize_round_trip(Path(tmp) / "sanitize_check")
+        _check_xml_body_roots()
         _check_named_xml_fields()
         _check_filter_response_headers(Path(tmp) / "filter_response_headers")
         _check_threaded_requests(Path(tmp) / "threaded_requests")
