@@ -3,7 +3,9 @@ import json
 import os
 import sys
 from abc import ABC, abstractmethod
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
+from threading import RLock
+from unittest.mock import patch
 
 import vcr
 from faker import Faker
@@ -80,6 +82,7 @@ class VCRBaseTestRunner(ABC):
         return os.path.join(self.test_case_path, subdir, self.output_basename)
 
     def run_test(self):
+        """Run the case with VCR, then sanitize recordings or compare replay output."""
         for filename in self.required_files:
             file_path = os.path.join(self.test_case_path, filename)
             if not os.path.exists(file_path):
@@ -110,7 +113,7 @@ class VCRBaseTestRunner(ABC):
         filter_query_parameters = test_config.get("filter_query_parameters", [])
         print(f"Filtering query parameters: {filter_query_parameters}")
 
-        with self.vcr_use_cassette(filter_query_parameters):
+        with self.vcr_use_cassette(filter_query_parameters), self._requests_transport_lock():
             freeze_datetime = test_config.get("freeze_time")
             ctx = freeze_time(freeze_datetime) if freeze_datetime else nullcontext()
             with ctx:
@@ -141,6 +144,27 @@ class VCRBaseTestRunner(ABC):
         script_dir = os.path.dirname(os.path.abspath(inspect.getfile(cls)))
         runner = cls(test_case, script_dir)
         runner.run_test()
+
+    @contextmanager
+    def _requests_transport_lock(self):
+        """Serialize requests sends while allowing nested sends for redirects."""
+        # VCR temporarily unpatches HTTP globally; overlapping sends can bypass it.
+        try:
+            from requests.sessions import Session
+        except ImportError:
+            yield
+            return
+
+        original_send = Session.send
+        lock = RLock()
+
+        def send(session, *args, **kwargs):
+            """Hold the reentrant transport lock until the send completes."""
+            with lock:
+                return original_send(session, *args, **kwargs)
+
+        with patch.object(Session, "send", send):
+            yield
 
     def sanitize_cassette(self):
         """Default-scrub JSON/XML response leaves; PRESERVE_KEYS stay real. Request TOKEN_KEYS redacted."""
