@@ -237,6 +237,7 @@ def _scrub_list(
     replace_fn: Callable[[str, Any], Any],
     xml_fields: bool = False,
 ) -> list:
+    """Scrub list leaves and recurse into nested containers using the same rules."""
     out = []
     for item in values:
         if isinstance(item, dict):
@@ -362,7 +363,14 @@ def _parse_body(body: str) -> tuple[Any, str] | None:
         return None
     for key, value in data.items():
         prefix, separator, local = key.rpartition(":")
-        if key.lower() == "html" or (
+        if (
+            key.lower() == "html"
+            and (
+                not isinstance(value, dict)
+                or not value.get("@xmlns")
+                or value.get("@xmlns") == "http://www.w3.org/1999/xhtml"
+            )
+        ) or (
             separator
             and local.lower() == "html"
             and isinstance(value, dict)

@@ -286,6 +286,7 @@ class _StubVCRRunner(VCRBaseTestRunner):
 
 
 def _check_threaded_requests(tmp: Path) -> None:
+    """Check send serialization, nested redirects, and restoration after errors."""
     try:
         from requests.sessions import Session
     except ImportError:
@@ -302,6 +303,7 @@ def _check_threaded_requests(tmp: Path) -> None:
     active = maximum = 0
 
     def fake_send(session, request, **kwargs):
+        """Track overlapping sends and simulate a redirect through Session.send."""
         nonlocal active, maximum
         if request == "redirect":
             return session.send("redirected")
@@ -314,11 +316,13 @@ def _check_threaded_requests(tmp: Path) -> None:
         return request
 
     def request(index):
+        """Start a request alongside the other workers."""
         barrier.wait(timeout=5)
         return Session().send(index)
 
     class _ThreadedRunner(_StubVCRRunner):
         def run_launch(self):
+            """Exercise concurrent sends and a nested redirect inside the runner."""
             with ThreadPoolExecutor(max_workers=workers) as pool:
                 assert list(pool.map(request, range(workers))) == list(range(workers))
             # Requests follows redirects through a nested Session.send call.
@@ -1004,9 +1008,10 @@ def _check_target_value_scrub(tmp: Path) -> None:
 
 
 def _check_xml_body_roots() -> None:
+    """Reject HTML and XHTML while allowing XML roots in other namespaces."""
     for scrub in (
         lambda body: scrub_request_body(body, {"password"}),
-        lambda body: scrub_response_body(body, {"@xmlns:api"}, Faker(), {}, {"password"}),
+        lambda body: scrub_response_body(body, {"@xmlns", "@xmlns:api"}, Faker(), {}, {"password"}),
     ):
         for prefix in ("", '<?xml version="1.0"?>'):
             for namespace_prefix in ("", "xh:", "custom:"):
@@ -1023,17 +1028,30 @@ def _check_xml_body_roots() -> None:
                 else:
                     raise AssertionError("XHTML bodies must be rejected regardless of prefix")
 
-        for root in ("api:response", "api:html"):
-            body = (
-                f'<{root} xmlns:api="urn:example:api">'
-                f'<password>secret-password</password></{root}>'
-            )
-            out = xmltodict.parse(scrub(body))[root]
-            assert out["@xmlns:api"] == "urn:example:api"
-            assert out["password"] == "sec***"
+            for body in ("<html/>", '<html xmlns=""/>', "<html><body>example</body></html>"):
+                try:
+                    scrub(prefix + body)
+                except NotImplementedError:
+                    pass
+                else:
+                    raise AssertionError("Unnamespaced HTML bodies must be rejected")
+
+            for root, xmlns in (
+                ("api:response", "xmlns:api"),
+                ("api:html", "xmlns:api"),
+                ("html", "xmlns"),
+            ):
+                body = (
+                    f'<{root} {xmlns}="urn:example:api">'
+                    f'<password>secret-password</password></{root}>'
+                )
+                out = xmltodict.parse(scrub(prefix + body))[root]
+                assert out[f"@{xmlns}"] == "urn:example:api"
+                assert out["password"] == "sec***"
 
 
 def _check_named_xml_fields() -> None:
+    """Check named XML values, schema attributes, and unchanged JSON handling."""
     body = (
         '<result><record><field name="email" id="email" value="live@example.com"/>'
         '<field name="internal_modified_date" id="internal_modified_date" '
@@ -1346,7 +1364,7 @@ def _check_sanitize_round_trip(tmp: Path) -> None:
 
 
 def main() -> None:
-
+    """Run the harness self-checks with temporary fixtures and runtime files."""
     with tempfile.TemporaryDirectory() as tmp:
         case = Path(tmp) / "orders_test"
         case.mkdir()

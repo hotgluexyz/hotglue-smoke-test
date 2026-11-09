@@ -82,6 +82,7 @@ class VCRBaseTestRunner(ABC):
         return os.path.join(self.test_case_path, subdir, self.output_basename)
 
     def run_test(self):
+        """Run the case with VCR, then sanitize recordings or compare replay output."""
         for filename in self.required_files:
             file_path = os.path.join(self.test_case_path, filename)
             if not os.path.exists(file_path):
@@ -146,6 +147,7 @@ class VCRBaseTestRunner(ABC):
 
     @contextmanager
     def _requests_transport_lock(self):
+        """Serialize requests sends while allowing nested sends for redirects."""
         # VCR temporarily unpatches HTTP globally; overlapping sends can bypass it.
         try:
             from requests.sessions import Session
@@ -157,6 +159,7 @@ class VCRBaseTestRunner(ABC):
         lock = RLock()
 
         def send(session, *args, **kwargs):
+            """Hold the reentrant transport lock until the send completes."""
             with lock:
                 return original_send(session, *args, **kwargs)
 
