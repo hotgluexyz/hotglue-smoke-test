@@ -416,6 +416,29 @@ def _check_filter_response_headers(tmp: Path) -> None:
         assert cassette.responses[0]["headers"]["Content-Type"] == ["application/json"]
 
 
+def _check_xml_request_normalization(tmp: Path) -> None:
+    runner = _StubVCRRunner("case_test", str(tmp))
+    xml = (
+        "<request><password>sender-password</password>"
+        "<password>user-password</password></request>"
+    )
+    cassette_path = Path(runner.vcr_cassette_path)
+    cassette_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with runner.vcr_use_cassette([]) as cassette:
+        cassette.append(
+            Request(method="POST", uri="https://example.com/xml", body=xml, headers={}),
+            {"headers": {}, "body": {"string": "{}"}},
+        )
+        assert b"sender-password" not in cassette.requests[0].body
+        assert b"user-password" not in cassette.requests[0].body
+
+    with runner.vcr_use_cassette([]) as cassette:
+        assert cassette.can_play_response_for(
+            Request(method="POST", uri="https://example.com/xml", body=xml, headers={})
+        )
+
+
 def _check_runner_uri_scrub(tmp: Path) -> None:
     class _UriScrubRunner(_StubVCRRunner):
         def scrub_uri(self, uri: str) -> str:
@@ -1542,6 +1565,7 @@ def main() -> None:
         _check_filter_response_headers(Path(tmp) / "filter_response_headers")
         _check_threaded_requests(Path(tmp) / "threaded_requests")
         _check_case_scrub_extras(Path(tmp) / "case_scrub_extras")
+        _check_xml_request_normalization(Path(tmp) / "xml_request_normalization")
         _check_runner_uri_scrub(Path(tmp) / "runner_uri_scrub")
         _check_runner_response_scrub(Path(tmp) / "runner_response_scrub")
         _check_form_request_scrub(Path(tmp) / "form_request_scrub")

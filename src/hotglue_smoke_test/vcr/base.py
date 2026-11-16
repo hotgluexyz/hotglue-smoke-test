@@ -15,6 +15,7 @@ from hotglue_smoke_test.vcr.sanitize import (
     sanitize_cassette_file,
     sanitize_config_credentials,
     scrub_request_body,
+    scrub_xml_request_body,
     scrub_response_body as sanitize_response_body,
 )
 
@@ -197,6 +198,18 @@ class VCRBaseTestRunner(ABC):
                 headers.pop(key, None)
         return response
 
+    def before_record_request(self, request):
+        """Redact XML request credentials before recording and replay matching."""
+        if request.body:
+            try:
+                body = request.body.decode("utf-8")
+            except UnicodeDecodeError:
+                return request
+            scrubbed = scrub_xml_request_body(body, set(self.TOKEN_KEYS))
+            if scrubbed is not None:
+                request.body = scrubbed
+        return request
+
     def vcr_use_cassette(self, filter_query_parameters):
         return vcr.use_cassette(
             self.vcr_cassette_path,
@@ -204,6 +217,7 @@ class VCRBaseTestRunner(ABC):
             filter_headers=list(self.FILTER_HEADERS),
             filter_post_data_parameters=list(self.TOKEN_KEYS),
             filter_query_parameters=filter_query_parameters,
+            before_record_request=self.before_record_request,
             before_record_response=self.before_record_response,
         )
 

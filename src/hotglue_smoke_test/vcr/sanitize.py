@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import parse_qsl, urlencode
@@ -151,6 +152,19 @@ def redact_credential(value: Any) -> Any:
     if isinstance(value, int):
         return str(value)[:3] + "***"
     return value
+
+
+def scrub_xml_request_body(body: str, token_keys: set[str]) -> str | None:
+    """Redact TOKEN_KEYS in XML request bodies, leaving other bodies untouched."""
+    try:
+        root = ET.fromstring(body)
+    except ET.ParseError:
+        return None
+
+    for element in root.iter():
+        if element.tag.rsplit("}", 1)[-1] in token_keys:
+            element.text = redact_credential(element.text)
+    return ET.tostring(root, encoding="unicode")
 
 
 def scrub_tokens_in_json(data: Any, token_keys: set[str], *, xml_fields: bool = False) -> Any:
