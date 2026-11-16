@@ -200,14 +200,29 @@ class VCRBaseTestRunner(ABC):
 
     def before_record_request(self, request):
         """Redact XML request credentials before recording and replay matching."""
-        if request.body:
+        body = request.body
+        if isinstance(body, (bytes, bytearray)):
             try:
-                body = request.body.decode("utf-8")
+                text = body.decode("utf-8")
             except UnicodeDecodeError:
                 return request
-            scrubbed = scrub_xml_request_body(body, set(self.TOKEN_KEYS))
-            if scrubbed is not None:
-                request.body = scrubbed
+        elif hasattr(body, "read") and hasattr(body, "tell") and hasattr(body, "seek"):
+            position = body.tell()
+            try:
+                raw = body.read()
+            finally:
+                body.seek(position)
+            if not isinstance(raw, (bytes, bytearray)):
+                return request
+            try:
+                text = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                return request
+        else:
+            return request
+        scrubbed = scrub_xml_request_body(text, set(self.TOKEN_KEYS))
+        if scrubbed is not None:
+            request.body = scrubbed
         return request
 
     def vcr_use_cassette(self, filter_query_parameters):
