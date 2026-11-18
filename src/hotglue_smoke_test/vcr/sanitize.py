@@ -282,13 +282,17 @@ def make_faker_replace_fn(
     faker, cache: dict, preserve_values: set[Any] | None = None
 ) -> Callable[[str, Any], Any]:
     """Deterministic Faker replacement: same real value → same fake (any field)."""
-    preserve_values = set(preserve_values or ())
+    # Match by type and value so True and 1 stay distinct.
+    preserve_values = {(type(v), v) for v in preserve_values or ()}
 
     def replace(key: str, value: Any) -> Any:
         if value is None:
             return None
-        if isinstance(value, str) and value in preserve_values:
-            return value
+        try:
+            if (type(value), value) in preserve_values:
+                return value
+        except TypeError:  # unhashable leaf (list/dict)
+            pass
         # "" and whitespace-only strings are preserved
         if isinstance(value, str) and not value.strip():
             return value
