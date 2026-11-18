@@ -5,6 +5,7 @@ import sys
 from abc import ABC, abstractmethod
 from contextlib import contextmanager, nullcontext
 from threading import RLock
+from typing import Any
 from unittest.mock import patch
 
 import vcr
@@ -32,6 +33,9 @@ class VCRBaseTestRunner(ABC):
         "x-api-key",
     ]
     PRESERVE_KEYS: set[str] = set()
+    # Literal values the connector branches on (enums, scopes, flags); kept real so
+    # replay takes the same code path it took while recording.
+    PRESERVE_VALUES: set[Any] = set()
     TOKEN_KEYS = [
         "access_token",
         "refresh_token",
@@ -65,6 +69,7 @@ class VCRBaseTestRunner(ABC):
         # Instance unions so overrides that read self.PRESERVE_KEYS / TOKEN_KEYS /
         # FILTER_HEADERS (e.g. custom vcr_use_cassette) pick up case extras.
         self.PRESERVE_KEYS = set(self.PRESERVE_KEYS) | set(self.test_config.get("preserve_keys") or ())
+        self.PRESERVE_VALUES = set(self.PRESERVE_VALUES) | set(self.test_config.get("preserve_values") or ())
         self.TOKEN_KEYS = list(dict.fromkeys([*self.TOKEN_KEYS, *(self.test_config.get("token_keys") or ())]))
         self.FILTER_HEADERS = list(dict.fromkeys([*self.FILTER_HEADERS, *(self.test_config.get("filter_headers") or ())]))
 
@@ -182,7 +187,8 @@ class VCRBaseTestRunner(ABC):
     def scrub_response_body(self, body: str, faker: Faker, cache: dict) -> str:
         """Scrub a cassette response body. Override for connector-specific response rules."""
         return sanitize_response_body(
-            body, set(self.PRESERVE_KEYS), faker, cache, set(self.TOKEN_KEYS)
+            body, set(self.PRESERVE_KEYS), faker, cache, set(self.TOKEN_KEYS),
+            set(self.PRESERVE_VALUES),
         )
 
     def scrub_uri(self, uri: str) -> str:

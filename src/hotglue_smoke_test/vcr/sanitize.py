@@ -278,12 +278,17 @@ def _scrub_list(
     return out
 
 
-def make_faker_replace_fn(faker, cache: dict) -> Callable[[str, Any], Any]:
+def make_faker_replace_fn(
+    faker, cache: dict, preserve_values: set[Any] | None = None
+) -> Callable[[str, Any], Any]:
     """Deterministic Faker replacement: same real value → same fake (any field)."""
+    preserve_values = set(preserve_values or ())
 
     def replace(key: str, value: Any) -> Any:
         if value is None:
             return None
+        if isinstance(value, str) and value in preserve_values:
+            return value
         # "" and whitespace-only strings are preserved
         if isinstance(value, str) and not value.strip():
             return value
@@ -406,13 +411,14 @@ def scrub_parsed_body(
     token_keys: set[str],
     *,
     xml_fields: bool = False,
+    preserve_values: set[Any] | None = None,
 ) -> Any:
     """Redact tokens then default-scrub leaves; preserve_keys / token_keys stay as placeholders or real."""
     data = scrub_tokens_in_json(data, token_keys, xml_fields=xml_fields)
     return scrub_json_tree(
         data,
         preserve_keys=preserve_keys | token_keys,
-        replace_fn=make_faker_replace_fn(faker, cache),
+        replace_fn=make_faker_replace_fn(faker, cache, preserve_values),
         xml_fields=xml_fields,
     )
 
@@ -423,6 +429,7 @@ def scrub_response_body(
     faker,
     cache: dict,
     token_keys: set[str],
+    preserve_values: set[Any] | None = None,
 ) -> str:
     """Parse JSON or XML response, redact tokens, default-scrub other leaves, re-serialize."""
     parsed = _parse_body(body)
@@ -433,7 +440,8 @@ def scrub_response_body(
     data, kind = parsed
     return _dump_body(
         scrub_parsed_body(
-            data, preserve_keys, faker, cache, token_keys, xml_fields=kind == "xml"
+            data, preserve_keys, faker, cache, token_keys, xml_fields=kind == "xml",
+            preserve_values=preserve_values,
         ),
         kind,
     )
