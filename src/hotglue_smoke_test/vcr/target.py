@@ -1,20 +1,14 @@
 import os
 import sys
-from typing import Any
 
 from hotglue_smoke_test.vcr.base import VCRBaseTestRunner
 from hotglue_smoke_test.vcr.target_scrub import scrub_target_case
 
 
 class VCRTargetTestRunner(VCRBaseTestRunner):
-    # Literal values the target branches on (enums, currencies); kept real so
-    # replay takes the same code path it took while recording.
-    PRESERVE_VALUES: set[Any] = set()
-
     def __init__(self, test_case: str, script_dir: str):
         self.required_files = ["config.json", "data.singer"]
         super().__init__(test_case, script_dir)
-        self.PRESERVE_VALUES = set(self.PRESERVE_VALUES) | set(self.test_config.get("preserve_values") or ())
 
     def sanitize_cassette(self):
         """Scrub data.singer and the cassette together with one shared value map."""

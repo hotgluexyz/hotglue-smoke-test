@@ -296,7 +296,7 @@ Connector `__smoke-tests__/record-vcr.py`:
 from hotglue_smoke_test.vcr.tap import VCRTapTestRunner
 ```
 
-Override `scrub_response_body()` for connector-specific response-body rules, or `scrub_uri()` for PII in request paths or query strings. Default base scrub redacts `TOKEN_KEYS` and fakes other leaves in JSON **and** XML response bodies; JSON/XML and URL-encoded form request bodies only redact `TOKEN_KEYS`. Form scrubbing preserves field order, repeated fields, and blank values, and matches credential names without regard to case. Unsupported request/response bodies still raise. Set tap `PRESERVE_KEYS` for any response keys the tap feeds into the next request or state.
+Override `scrub_response_body()` for connector-specific response-body rules, or `scrub_uri()` for PII in request paths or query strings. Default base scrub redacts `TOKEN_KEYS` and fakes other leaves in JSON **and** XML response bodies; JSON/XML and URL-encoded form request bodies only redact `TOKEN_KEYS`. Form scrubbing preserves field order, repeated fields, and blank values, and matches credential names without regard to case. Unsupported request/response bodies still raise. Set tap `PRESERVE_KEYS` for any response keys the tap feeds into the next request or state, and `PRESERVE_VALUES` for literal response values it branches on (e.g. a scope name).
 
 Per-case scrub extras go in `<case>/test-config.json` and are unioned onto the runner class lists (one stream can add keys without widening `record-vcr.py` / `record-etl.py`):
 
@@ -305,7 +305,7 @@ Per-case scrub extras go in `<case>/test-config.json` and are unioned onto the r
 | `preserve_keys` | yes | yes | yes |
 | `token_keys` | yes | yes | yes |
 | `filter_headers` | yes | yes | — |
-| `preserve_values` | — | yes | yes |
+| `preserve_values` | yes | yes | yes |
 | `preserve_columns` | — | — | yes |
 
 Tap/target merge onto the instance’s `PRESERVE_*` / `TOKEN_KEYS` / `FILTER_HEADERS` at init, so existing `record-vcr.py` overrides that read those attributes (custom `vcr_use_cassette`, `scrub_response_body`, …) pick up case extras with no changes. ETL merges the same way in `_preserve_config` when scrubbing fixtures.
