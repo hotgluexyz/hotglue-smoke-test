@@ -125,17 +125,9 @@ class ETLSmokeRunner(ABC):
         flow = cfg.get("flow") or cfg.get("FLOW") or self.FLOW
         job_type = cfg.get("job_type") or cfg.get("JOB_TYPE") or self.JOB_TYPE
         tenant = cfg.get("tenant") or cfg.get("TENANT") or self.TENANT
-        env = {key: str(value) for key, value in (cfg.get("env") or {}).items()}
-        env.update(
-            (key, str(value))
-            for key, value in (
-                ("FLOW", flow),
-                ("JOB_TYPE", job_type),
-                ("TENANT", tenant),
-            )
-            if value is not None
-        )
-        return env
+        named = {"FLOW": flow, "JOB_TYPE": job_type, "TENANT": tenant}
+        env = {**(cfg.get("env") or {}), **{k: v for k, v in named.items() if v is not None}}
+        return {key: str(value) for key, value in env.items()}
 
     def _preserve_config(self) -> dict[str, Any]:
         preserve_columns = _as_set(self.PRESERVE_COLUMNS)

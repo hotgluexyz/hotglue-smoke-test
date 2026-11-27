@@ -332,9 +332,8 @@ CLI shells out to `record-etl.py` with
 
 ETL `run` compare (per UTC datetime): Singer `data.singer` when present, JSON etl-output,
 CSV etl-output, Parquet etl-output, then snapshots (CSV via legacy folder compare;
-parquet/json pairwise). Parquet etl-output must match by file name, schema (dtypes), row
-count, and row values including nested list/struct cells; `ignore_files`,
-`ignore_columns`, and `sort_config` apply per file stem. Without `sort_config`, row order
-must match.
+parquet/json pairwise). Parquet etl-output must match by file name, Arrow schema, row
+count, and row values in order (nested list/struct cells included); `ignore_files` and
+`ignore_columns` apply per file stem.
 
 Self-check: `python -m hotglue_smoke_test.self_check`

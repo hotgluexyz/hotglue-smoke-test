@@ -299,9 +299,25 @@ def _check_etl_parquet_compare(tmp: Path) -> None:
 
     write(rows.iloc[::-1])
     _assert_raises_assertion(lambda: compare_parquet_folder("order", expected, actual, cfg))
-    compare_parquet_folder("sorted", expected, actual, {**cfg, "sort_config": {"orders": ["id"]}})
-
     write(rows)
+
+    # Nullable ints: pandas without nullable dtypes reads both as float64, losing
+    # the width difference and precision above 2**53.
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    def ints(values, typ, directory):
+        pq.write_table(pa.table({"n": pa.array(values, typ)}), directory / "ints.parquet")
+
+    ints([1, None], pa.int64(), expected)
+    ints([1, None], pa.int32(), actual)
+    _assert_raises_assertion(lambda: compare_parquet_folder("width", expected, actual, cfg))
+    ints([2**53, None], pa.int64(), expected)
+    ints([2**53 + 1, None], pa.int64(), actual)
+    _assert_raises_assertion(lambda: compare_parquet_folder("precision", expected, actual, cfg))
+    ints([2**53, None], pa.int64(), actual)
+    compare_parquet_folder("ints equal", expected, actual, cfg)
+
     write(rows, name="extra")
     _assert_raises_assertion(lambda: compare_parquet_folder("extra", expected, actual, cfg))
     compare_parquet_folder("ignored file", expected, actual, {**cfg, "ignore_files": ["extra"]})
