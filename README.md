@@ -319,10 +319,22 @@ schema files (`catalog.json` / `selectedTables.json` / …); override `after_etl
 `YourClass.main()` under `if __name__ == "__main__"`.
 One Runner serves many `*_test` case folders. Optional per-case `flow`, `job_type`,
 and `tenant` overrides also go in `<case>/test-config.json`; unset values are omitted so
-`etl.py` keeps its defaults. CLI shells out to `record-etl.py` with
+`etl.py` keeps its defaults. An `env` map sets other variables for that case only and
+overrides the caller's environment (`flow` / `job_type` / `tenant` still win), e.g. one
+script's cases per export format:
+
+```json
+{"env": {"DEFAULT_EXPORT_FORMAT": "parquet"}}
+```
+
+CLI shells out to `record-etl.py` with
 `SMOKE_TEST_MODE` the same way it shells out to `record-vcr.py`.
 
 ETL `run` compare (per UTC datetime): Singer `data.singer` when present, JSON etl-output,
-CSV etl-output, then snapshots (CSV via legacy folder compare; parquet/json pairwise).
+CSV etl-output, Parquet etl-output, then snapshots (CSV via legacy folder compare;
+parquet/json pairwise). Parquet etl-output must match by file name, schema (dtypes), row
+count, and row values including nested list/struct cells; `ignore_files`,
+`ignore_columns`, and `sort_config` apply per file stem. Without `sort_config`, row order
+must match.
 
 Self-check: `python -m hotglue_smoke_test.self_check`
