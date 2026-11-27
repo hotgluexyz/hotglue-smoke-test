@@ -317,6 +317,12 @@ def _check_etl_parquet_compare(tmp: Path) -> None:
     _assert_raises_assertion(lambda: compare_parquet_folder("precision", expected, actual, cfg))
     ints([2**53, None], pa.int64(), actual)
     compare_parquet_folder("ints equal", expected, actual, cfg)
+    # Sub-microsecond difference: Python datetime.time conversion hides it.
+    ints([1000], pa.time64("ns"), expected)
+    ints([1001], pa.time64("ns"), actual)
+    _assert_raises_assertion(lambda: compare_parquet_folder("time64", expected, actual, cfg))
+    ints([1000], pa.time64("ns"), actual)
+    compare_parquet_folder("time64 equal", expected, actual, cfg)
 
     write(rows, name="extra")
     _assert_raises_assertion(lambda: compare_parquet_folder("extra", expected, actual, cfg))

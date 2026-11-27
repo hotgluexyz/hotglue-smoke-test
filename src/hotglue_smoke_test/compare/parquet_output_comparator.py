@@ -50,9 +50,12 @@ def compare_parquet_folder(
             f"expected {exp.num_rows}, actual {act.num_rows}"
         )
         if not exp.equals(act):
+            # Arrow decides; Python rows only locate the difference (they can hide
+            # sub-microsecond values, so a mismatch may not show up in them).
             for index, (exp_row, act_row) in enumerate(zip(exp.to_pylist(), act.to_pylist())):
                 assert exp_row == act_row, (
                     f"[{label}] {name} row {index} mismatch:\n"
                     f"expected {exp_row}\nactual   {act_row}"
                 )
+            raise AssertionError(f"[{label}] {name} values differ (below Python precision)")
         print(f"Success! Parquet comparison [{label}] {name}: {act.num_rows} records")
