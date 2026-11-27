@@ -42,6 +42,7 @@ from hotglue_smoke_test.vcr.sanitize import (
 from hotglue_smoke_test.vcr.target_scrub import TargetValueScrubber, scrub_target_case
 from hotglue_smoke_test.compare.csv_output_comparator import compare_csv_folder
 from hotglue_smoke_test.compare.json_output_comparator import JsonOutputComparator
+from hotglue_smoke_test.compare.parquet_output_comparator import compare_parquet_folder
 from hotglue_smoke_test.compare.snapshot_output_comparator import compare_snapshots
 from hotglue_smoke_test.compare.test_configurer import TestConfigurer
 from hotglue_smoke_test.etl.base import ETLSmokeRunner, _snapshot_flow_hint
@@ -252,6 +253,88 @@ def _check_etl_compare_noops(tmp: Path) -> None:
     JsonOutputComparator("noop", str(expected), str(actual), cfg).compare()
     compare_csv_folder("noop", str(actual), str(expected), {"test_config": cfg})
     compare_snapshots(tmp / "missing_snaps", tmp / "missing_snaps", label="noop", test_config=cfg)
+
+
+def _check_etl_parquet_compare(tmp: Path) -> None:
+    """Parquet etl-output compares nested values, dtypes, files; honours test-config."""
+    import pandas as pd
+
+    expected = tmp / "expected"
+    actual = tmp / "actual"
+    expected.mkdir(parents=True)
+    actual.mkdir()
+    cfg = TestConfigurer.get_test_config(str(tmp))
+    rows = pd.DataFrame(
+        {
+            "id": ["1", "2"],
+            "total": [1.5, None],
+            "lines": [[{"sku": "a", "qty": 1}], [{"sku": "b", "qty": 2}]],
+            "noise": ["x", "y"],
+        }
+    )
+
+    def write(df: pd.DataFrame, directory: Path = actual, name: str = "orders") -> None:
+        df.to_parquet(directory / f"{name}.parquet", index=False)
+
+    write(rows, expected)
+    write(rows)
+    compare_parquet_folder("same", expected, actual, cfg)
+
+    nested = rows.copy()
+    nested["lines"] = [[{"sku": "a", "qty": 1}], [{"sku": "CHANGED", "qty": 2}]]
+    write(nested)
+    _assert_raises_assertion(lambda: compare_parquet_folder("nested", expected, actual, cfg))
+
+    dtype = rows.copy()
+    dtype["id"] = [1, 2]
+    write(dtype)
+    _assert_raises_assertion(lambda: compare_parquet_folder("dtype", expected, actual, cfg))
+
+    noisy = rows.copy()
+    noisy["noise"] = ["p", "q"]
+    write(noisy)
+    _assert_raises_assertion(lambda: compare_parquet_folder("noise", expected, actual, cfg))
+    ignore = {**cfg, "ignore_columns": {"orders": ["noise"]}}
+    compare_parquet_folder("ignored", expected, actual, ignore)
+
+    write(rows.iloc[::-1])
+    _assert_raises_assertion(lambda: compare_parquet_folder("order", expected, actual, cfg))
+    write(rows)
+
+    # Nullable ints: pandas without nullable dtypes reads both as float64, losing
+    # the width difference and precision above 2**53.
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    def ints(values, typ, directory):
+        pq.write_table(pa.table({"n": pa.array(values, typ)}), directory / "ints.parquet")
+
+    ints([1, None], pa.int64(), expected)
+    ints([1, None], pa.int32(), actual)
+    _assert_raises_assertion(lambda: compare_parquet_folder("width", expected, actual, cfg))
+    ints([2**53, None], pa.int64(), expected)
+    ints([2**53 + 1, None], pa.int64(), actual)
+    _assert_raises_assertion(lambda: compare_parquet_folder("precision", expected, actual, cfg))
+    ints([2**53, None], pa.int64(), actual)
+    compare_parquet_folder("ints equal", expected, actual, cfg)
+    # Sub-microsecond difference: Python datetime.time conversion hides it.
+    ints([1000], pa.time64("ns"), expected)
+    ints([1001], pa.time64("ns"), actual)
+    _assert_raises_assertion(lambda: compare_parquet_folder("time64", expected, actual, cfg))
+    ints([1000], pa.time64("ns"), actual)
+    compare_parquet_folder("time64 equal", expected, actual, cfg)
+
+    write(rows, name="extra")
+    _assert_raises_assertion(lambda: compare_parquet_folder("extra", expected, actual, cfg))
+    compare_parquet_folder("ignored file", expected, actual, {**cfg, "ignore_files": ["extra"]})
+
+
+def _assert_raises_assertion(fn) -> None:
+    try:
+        fn()
+    except AssertionError:
+        return
+    raise AssertionError("expected AssertionError")
 
 
 def _swallow_success_system_exit(fn) -> None:
@@ -1519,6 +1602,15 @@ def main() -> None:
         (etl_case / "test-config.json").write_text('{"flow": "x"}\n')
         etl_runner = ETLSmokeRunner("bank_transactions_test", Path(tmp))
         assert etl_runner._case_env() == {"FLOW": "x"}
+        # `env` adds per-case variables; dedicated flow/job_type/tenant keys still win.
+        (etl_case / "test-config.json").write_text(
+            '{"flow": "x", "env": {"DEFAULT_EXPORT_FORMAT": "csv", "FLOW": "y", "N": 1}}\n'
+        )
+        assert etl_runner._case_env() == {
+            "DEFAULT_EXPORT_FORMAT": "csv",
+            "FLOW": "x",
+            "N": "1",
+        }
         (etl_case / "test-config.json").unlink()
         assert etl_runner._case_env() == {}
         snapshots = etl_case / "snapshots"
@@ -1573,6 +1665,7 @@ def main() -> None:
         _check_etl_deterministic_scrub()
         _check_etl_pythonpath(Path(tmp) / "etl_pythonpath")
         _check_etl_compare_noops(Path(tmp) / "etl_compare_noop")
+        _check_etl_parquet_compare(Path(tmp) / "etl_parquet_compare")
 
         def _exit(code):
             raise SystemExit(code)

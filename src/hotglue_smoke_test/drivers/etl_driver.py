@@ -9,6 +9,7 @@ from pathlib import Path
 from hotglue_smoke_test.artifacts import list_etl_datetime_dirs
 from hotglue_smoke_test.compare.csv_output_comparator import compare_csv_folder
 from hotglue_smoke_test.compare.json_output_comparator import JsonOutputComparator
+from hotglue_smoke_test.compare.parquet_output_comparator import compare_parquet_folder
 from hotglue_smoke_test.compare.singer_output_comparator import SingerOutputComparator
 from hotglue_smoke_test.compare.snapshot_output_comparator import compare_snapshots
 from hotglue_smoke_test.compare.test_configurer import TestConfigurer
@@ -52,6 +53,9 @@ class TestEtl(unittest.TestCase):
                     str(expected_etl),
                     {"test_config": test_config},
                 )
+
+                print(f"[PARQUET COMPARE] etl-output {label}")
+                compare_parquet_folder(label, expected_etl, actual_etl, test_config)
 
             print(f"[SNAPSHOT COMPARE] {label}")
             compare_snapshots(

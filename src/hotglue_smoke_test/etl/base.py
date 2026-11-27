@@ -116,20 +116,18 @@ class ETLSmokeRunner(ABC):
         return json.loads(path.read_text())
 
     def _case_env(self) -> dict[str, str]:
-        """Resolve explicitly configured job env; otherwise preserve etl.py defaults."""
+        """Resolve explicitly configured job env; otherwise preserve etl.py defaults.
+
+        ``env`` in test-config.json sets extra variables (e.g. ``DEFAULT_EXPORT_FORMAT``)
+        that override the caller's environment for this case only.
+        """
         cfg = self._load_test_config()
         flow = cfg.get("flow") or cfg.get("FLOW") or self.FLOW
         job_type = cfg.get("job_type") or cfg.get("JOB_TYPE") or self.JOB_TYPE
         tenant = cfg.get("tenant") or cfg.get("TENANT") or self.TENANT
-        return {
-            key: str(value)
-            for key, value in (
-                ("FLOW", flow),
-                ("JOB_TYPE", job_type),
-                ("TENANT", tenant),
-            )
-            if value is not None
-        }
+        named = {"FLOW": flow, "JOB_TYPE": job_type, "TENANT": tenant}
+        env = {**(cfg.get("env") or {}), **{k: v for k, v in named.items() if v is not None}}
+        return {key: str(value) for key, value in env.items()}
 
     def _preserve_config(self) -> dict[str, Any]:
         preserve_columns = _as_set(self.PRESERVE_COLUMNS)
